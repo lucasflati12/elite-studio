@@ -1,0 +1,14 @@
+.DS_Store
+*.app/
+.build/
+.swiftpm/
+.sourcekit-lsp/
+mac/elitestudio
+# Windows build output
+bin/
+obj/
+dist/
+build/
+node_modules/
+*.exe
+*.pdb

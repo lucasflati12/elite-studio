@@ -1,0 +1,43 @@
+ELITE STUDIO PER MAC
+
+Questa cartella contiene solo la versione Mac: applicazione, sorgenti Swift,
+risorse e strumenti di compilazione. La versione Windows è nella cartella
+separata "Elite Studio Windows" in Downloads.
+
+COME TRASFERIRLA
+
+Invia al Mac "Elite Studio Mac.zip" presente in Downloads ed estrailo.
+Lo ZIP conserva i permessi necessari per gli script e l'applicazione Mac.
+
+PRIMO AVVIO DELLA VERSIONE AGGIORNATA
+
+1. Servono un Mac Apple Silicon, macOS 26 o successivo e gli strumenti Xcode.
+2. Apri "Avvia Elite Studio.command" nella cartella estratta.
+   Al primo avvio compila i sorgenti aggiornati, poi apre Elite Studio.
+3. Se mancano gli strumenti Xcode, apri Terminale ed esegui:
+   xcode-select --install
+   Terminata l'installazione, riapri "Avvia Elite Studio.command".
+4. Se il file .command non è eseguibile, apri Terminale nella cartella
+   estratta ed esegui:
+   bash "Avvia Elite Studio.command"
+
+La revisione aggiornata dei sorgenti non è stata compilata o eseguita
+su macOS da questo PC Windows. La .app precompilata inclusa è quella
+precedente: usa il file .command per compilare gli aggiornamenti.
+
+FUNZIONI E COMANDI
+
+Cmd+I importa, Spazio riproduce/ferma, Cmd+S salva, Cmd+E esporta.
+Il menu Sequenza include titoli, testo libero, sottotitoli automatici,
+tracce aggiuntive e dissolvenze incrociate. L'ispettore contiene colore,
+dissolvenze, keyframe e volume automatico. Il menu File offre il
+ricollegamento dei file spostati e la cronologia dei progetti.
+
+I progetti .elitestudio possono passare tra Windows e Mac. Tieni progetto
+e media insieme per conservare i percorsi relativi. Se i file sono stati
+spostati usa File > Ricollega file mancanti.
+
+DOCUMENTAZIONE
+
+DOCUMENTAZIONE TECNICA.md descrive formato JSON e comandi Mac.
+VERIFICHE.md riporta i controlli svolti e quelli che richiedono ancora un Mac.
