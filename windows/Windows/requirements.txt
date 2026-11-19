@@ -1,0 +1,8 @@
+PySide6-Essentials>=6.8,<7
+PySide6-Addons>=6.8,<7
+opencv-python>=4.8,<5
+Pillow>=10,<13
+scipy>=1.10,<2
+pyopencl>=2024.1
+fonttools>=4.50,<5
+faster-whisper>=1.1,<2

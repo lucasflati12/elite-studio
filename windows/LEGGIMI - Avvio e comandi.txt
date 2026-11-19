@@ -1,0 +1,98 @@
+ELITE STUDIO PER WINDOWS
+
+Questa cartella contiene solo la versione Windows. La versione Mac è
+separata in "Elite Studio Mac" e in "Elite Studio Mac.zip" in Downloads.
+
+AVVIO SU QUESTO PC
+
+Doppio clic su "Elite Studio - Windows" sul Desktop oppure su
+"Elite Studio.exe" in questa cartella. Il collegamento Desktop è aggiornato.
+Conserva la cartella intera: l'eseguibile usa i file in Windows e Resources.
+Il runtime Python/Qt già installato e il modello vocale restano separati.
+
+SU UN ALTRO PC WINDOWS
+
+Servono Python 3.10+ e FFmpeg/ffprobe disponibili nel PATH.
+Esegui "Installa Elite Studio.bat": prepara il runtime, crea il collegamento
+Desktop e registra l'apertura dei progetti .elitestudio.
+Se sposti la cartella, esegui "Ripara Elite Studio.bat" per aggiornare
+il collegamento. "Diagnostica Elite Studio.bat" controlla eventuali errori.
+
+PRIMO MONTAGGIO
+
+Ctrl+I importa video, audio e foto; puoi trascinare file o cartelle nel
+pannello Progetto. Doppio clic su un file per aggiungerlo alla timeline.
+Trascina le clip per spostarle e i bordi per rifilarle.
+Spazio riproduce/ferma. C sceglie la lametta, V la selezione.
+Ctrl+S salva il progetto. Ctrl+E esporta un video MP4.
+
+FUNZIONI PRINCIPALI
+
+- Sequenza > Aggiungi traccia video/audio aggiunge tracce fino a otto.
+- L'ispettore ha le schede Clip, Effetti e Sottotitoli.
+- Effetti: colore, rotazione, dissolvenze video/audio e volume automatico.
+- Animazione: aggiungi un keyframe, sposta il cursore e modifica scala,
+  posizione, rotazione, opacità o volume per creare il secondo keyframe.
+- Dissolvenza incrociata: seleziona la seconda di due clip consecutive.
+  Sovrappone fino a 0,35 secondi usando una traccia superiore libera e
+  accorcia la sequenza dello stesso intervallo. Ctrl+Z annulla.
+- Sequenza > Aggiungi testo libero crea una scritta trasparente.
+- Sequenza > Genera sottotitoli automatici trascrive l'audio della timeline.
+  Seleziona una frase CC per correggere testo e tempi. Stili Negativo,
+  Bianco e Oro, dimensione, posizione, lingua e animazione sono modificabili.
+- Per il 360, importa il primo file .insv e tieni le due lenti insieme.
+  Trascina nel viewer per guardarti intorno e usa i controlli nell'ispettore.
+
+FLUIDITÀ, SALVATAGGIO ED EXPORT
+
+Preview 360/720/960 modifica solo la qualità dell'anteprima.
+Il menu Fluidità prepara proxy, prepara l'anteprima sincronizzata della
+sequenza, interrompe la preparazione dei proxy o pulisce la cache.
+La cache video è limitata a 1 GB; l'export usa sempre gli originali.
+I nuovi video con lato maggiore di 1920 px generano proxy in background.
+
+Il recupero automatico protegge anche i progetti ancora senza nome.
+Dopo una chiusura imprevista viene proposta la sessione recuperabile.
+File > Recupera sessione interrotta permette il recupero manuale.
+Dei progetti salvati si conservano fino a dieci versioni precedenti,
+al massimo una al minuto. Una versione precedente si apre come copia.
+
+Ctrl+E propone formato sequenza, verticale, orizzontale, quadrato o
+anteprima 720, codec H.264/HEVC, qualità e bitrate. La codifica hardware
+è usata quando disponibile; in caso di errore viene riprovata la CPU.
+
+SCORCIATOIE
+
+Ctrl+N/O/I/S/E   Nuovo / apri / importa / salva / esporta
+Ctrl+Shift+S     Salva con nome
+Ctrl+Z          Annulla
+Ctrl+Shift+Z    Ripeti
+Ctrl+A          Seleziona tutte le clip
+Ctrl+C/V        Copia / incolla la selezione al cursore
+Ctrl+K          Taglia al cursore
+Ctrl+T          Aggiungi titolo
+Canc            Elimina; sulla traccia CC elimina la frase
+Shift+Canc      Elimina e chiudi lo spazio
+Q/W             Rifila fino al cursore / dal cursore chiudendo lo spazio
+J/K/L           Indietro / stop / avanti; ripeti J o L per accelerare
+Frecce sx/dx    Un fotogramma (Shift: cinque)
+Frecce su/giù   Taglio precedente / successivo
+S               Aggancio ai tagli
++/-             Zoom
+\               Adatta tutta la timeline
+
+Ctrl+clic o Shift+clic aggiunge/toglie clip dalla selezione.
+Trascina da uno spazio vuoto per disegnare il rettangolo di selezione.
+La lametta con Shift taglia tutte le tracce.
+
+PASSAGGIO AL MAC E DATI LOCALI
+
+Progetti e media insieme mantengono i percorsi relativi. Sul computer di
+arrivo usa File > Ricollega file mancanti se i video sono stati spostati.
+La trascrizione Windows usa un modello locale, scaricato al primo uso
+su un nuovo PC. Il modello su questo PC è già disponibile.
+
+Runtime, cache, cronologia e log: %LOCALAPPDATA%\EliteStudioWindows
+Il programma funziona senza connessione dopo l'installazione e il download
+del modello vocale. Dettagli tecnici e verifiche sono nei file README.md,
+Windows/README.md e VERIFICHE.md.

@@ -9,7 +9,7 @@ A lightweight video editor I built for my own reels — and the workflow where a
 | Folder | Platform | Stack |
 |---|---|---|
 | [`mac/`](mac/) | macOS (Apple Silicon, macOS 26+) | Swift / SwiftUI + AVFoundation, no external dependencies |
-| [`windows/`](windows/) | Windows | see `windows/README` |
+| [`windows/`](windows/) | Windows 10/11 | Python 3.10+ / PySide6 (Qt), OpenCV, faster-whisper; FFmpeg on PATH |
 
 Features: two video lanes (V1/V2), audio levels, automatic captions, title overlays, Insta360 360° reframing (Mac), and a command line to check/export projects without opening the UI.
 
@@ -22,6 +22,25 @@ open "Avvia Elite Studio.command"
 ```
 
 The `.elitestudio` project format and the CLI (`elitestudio --check / --export / --captions`) are documented in [`mac/DOCUMENTAZIONE TECNICA.md`](mac/DOCUMENTAZIONE%20TECNICA.md) (Italian).
+
+## Windows — quick start
+
+Needs Python 3.10+ and FFmpeg/ffprobe on PATH.
+
+```bat
+cd windows
+:: creates the runtime in %LOCALAPPDATA%\EliteStudioWindows, a Desktop shortcut and the .elitestudio association
+"Installa Elite Studio.bat"
+"Start Elite Studio.bat"
+```
+
+Command line (with the runtime's Python):
+
+```bat
+python Windows\app.py --check|--export|--captions project.elitestudio
+```
+
+Details in [`windows/Windows/README.md`](windows/Windows/README.md) (Italian).
 
 ## Let an AI edit your video
 
