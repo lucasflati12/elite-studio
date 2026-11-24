@@ -15,6 +15,8 @@ Features: two video lanes (V1/V2), audio levels, automatic captions, title overl
 
 ## Mac — quick start
 
+**Insta360 360° on a Mac:** download the ready-to-use folder (app + Italian guide) [Insta360-360-su-Mac.zip](https://github.com/lucasflati12/elite-studio/releases/latest/download/Insta360-360-su-Mac.zip) — guide: [`mac/GUIDA-360-INSTA360.md`](mac/GUIDA-360-INSTA360.md).
+
 ```bash
 cd mac
 ./build.sh            # builds Elite Studio.app (needs Xcode command line tools)
