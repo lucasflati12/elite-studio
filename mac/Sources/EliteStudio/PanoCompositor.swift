@@ -21,8 +21,16 @@ struct CompLayer {
     var pano: PanoData?
     var reframe = Reframe()
     var clipStart = 0.0, sourceIn = 0.0, speed = 1.0
+    var frameRate = 0.0                                                 // of the 360 file; 0 = unknown
 
     func mediaTime(_ t: Double) -> Double { sourceIn + (t - clipStart) * speed }
+    /// Start time of the source frame AVFoundation shows at media time `mt` (the frame whose interval contains it).
+    /// The gyro must be read there, not at `mt`: they differ by up to one frame, by a varying amount when the
+    /// sequence fps differs from the camera's, which showed up as residual wobble after stabilization.
+    func frameTime(_ mt: Double) -> Double {
+        guard frameRate > 0 else { return mt }
+        return (mt * frameRate + 1e-3).rounded(.down) / frameRate
+    }
 }
 
 final class CompInstruction: NSObject, AVVideoCompositionInstructionProtocol {
@@ -231,7 +239,7 @@ final class GPU: @unchecked Sendable {
         let mt = l.mediaTime(time)
         let v = l.reframe.view(atMedia: mt)
         // view -> camera: stabilization, then the chosen direction
-        let stab: simd_quatf = l.reframe.stabilize ? p.stabilization(at: mt, lockDirection: l.reframe.lockDirection, smooth: l.reframe.smooth)
+        let stab: simd_quatf = l.reframe.stabilize ? p.stabilization(at: l.frameTime(mt), lockDirection: l.reframe.lockDirection, smooth: l.reframe.smooth)
                                                    : simd_quatf(angle: 0, axis: [0, 1, 0])
         let look = rotY(v.yaw) * rotX(-v.pitch) * rotZ(-v.roll)
         let s = simd_double3x3(simd_quatd(ix: Double(stab.imag.x), iy: Double(stab.imag.y), iz: Double(stab.imag.z), r: Double(stab.real)))

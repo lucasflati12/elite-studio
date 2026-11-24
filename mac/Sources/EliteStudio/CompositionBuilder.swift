@@ -188,7 +188,7 @@ enum CompositionBuilder {
                     l.pano = pano
                     l.reframe = c.reframe ?? Reframe()
                     l.clipStart = Double(seg.start) / Double(timescale)
-                    l.sourceIn = c.sourceIn; l.speed = c.speed
+                    l.sourceIn = c.sourceIn; l.speed = c.speed; l.frameRate = rt.frameRate
                     if rt.lens2 != nil, let t2 = b.lensBTrackIDs[lane] { l.trackID2 = t2 }
                 } else {
                     l.transform = transform(for: neutral, runtime: rt, frame: frame)

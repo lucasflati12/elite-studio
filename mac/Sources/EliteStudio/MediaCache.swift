@@ -15,6 +15,7 @@ struct MediaRuntime {
     var lens2: AVAssetTrack? = nil        // 360 clip recorded as two files: the second lens
     var lens2Range: CMTimeRange? = nil
     var pano: PanoData? = nil
+    var frameRate: Double = 0             // 360 clips: the gyro is sampled at the shown frame's own time
 }
 
 /// Thumbnails, waveforms and loaded assets, keyed by media id.
@@ -84,6 +85,7 @@ final class MediaCache: ObservableObject {
             if let a { ar = try await a.load(.timeRange) }
             var rt = MediaRuntime(asset: asset, video: v, audio: a, transform: tr, natural: nat, videoRange: vr, audioRange: ar)
             if item.pano {
+                if let v, let fps = try? await v.load(.nominalFrameRate), fps > 0 { rt.frameRate = Double(fps) }
                 if let other = InsvReader.companion(of: item.url) {
                     let a2 = Self.asset(other)
                     if let v2 = try await a2.loadTracks(withMediaType: .video).first {

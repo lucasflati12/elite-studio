@@ -128,4 +128,5 @@ stabilization toggles and keyframes (stored in media time, so cuts keep them in 
 `PanoCompositor.swift` (Metal renderer, used only when the project contains 360 clips), `PanoUI.swift`.
 
 JSON: clip field `pano` = `{ "yaw", "pitch", "roll", "fov", "distance", "stabilize", "lockDirection", "smooth", "keys": [{ "t", "view": {…} }] }` (all optional).
+The gyro is sampled at the start time of the source frame actually shown (`CompLayer.frameTime`, from the track's nominal frame rate), not at the composition time: sampling at the composition time left up to one frame of mismatch, seen as residual wobble.
 Tested only on ONE R 360 footage; IMU axis mapping and lens model for other Insta360 models are unverified.
