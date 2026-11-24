@@ -207,15 +207,26 @@ class PanoRenderer:
         if getattr(self,'second',None) is not None: self.second.release()
 
     def read(self,cap,t):
+        """Decode the frame shown at timeline time t; also returns that frame's own timestamp.
+        The gyro must be sampled at the decoded frame's time, not at t: the two differ by up to half
+        a frame (and by a varying amount when the export fps differs from the camera's), which
+        showed up as residual wobble after stabilization."""
         key=id(cap); fps=cap.get(cv2.CAP_PROP_FPS) or 30; index=round(max(0,t)*fps)
-        if key in self.last and self.last[key][0]==index: return self.last[key][1]
+        if key in self.last and self.last[key][0]==index: return self.last[key][1:]
         position=round(cap.get(cv2.CAP_PROP_POS_FRAMES))
         if 0<=index-position<30:
             for _ in range(index-position): cap.grab()
-        elif position!=index: cap.set(cv2.CAP_PROP_POS_MSEC,max(0,t)*1000)
+        elif position!=index: cap.set(cv2.CAP_PROP_POS_FRAMES,index)
         ok,frame=cap.read()
         if not ok: raise ValueError(f'Cannot decode the 360 lens at {t:.3f}s')
-        self.last[key]=(index,frame); return frame
+        actual=round(cap.get(cv2.CAP_PROP_POS_FRAMES))-1
+        if actual<0 or abs(actual-index)>1: actual=index
+        self.last[key]=(index,frame,actual/fps); return frame,actual/fps
+
+    def frames(self,t):
+        first,stamp=self.read(self.cap,t)
+        second=self.read(self.second,t)[0] if self.second is not None else first
+        return first,second,stamp
 
     def render(self,t,width,height,reframe=None,use_gpu=True):
         r=reframe or {}; v=view_at(r,t)
@@ -223,8 +234,8 @@ class PanoRenderer:
             from pano_gpu import GPU
             gpu=GPU.get()
             if gpu is not None:
-                matrix=self.data.stabilization(t,r)@rot(1,v['yaw'])@rot(0,-v['pitch'])@rot(2,-v['roll'])
-                first=self.read(self.cap,t); second=self.read(self.second,t) if self.second is not None else first
+                first,second,stamp=self.frames(t)
+                matrix=self.data.stabilization(stamp,r)@rot(1,v['yaw'])@rot(0,-v['pitch'])@rot(2,-v['roll'])
                 return gpu.render([first,second],self.data,matrix,v,width,height)
         key=(width,height,round(v['fov'],5),round(v['distance'],5))
         if key not in self.grids:
@@ -238,10 +249,10 @@ class PanoRenderer:
             direction/=np.maximum(np.linalg.norm(direction,axis=-1)[:,:,None],1e-9)
             self.grids[key]=direction.reshape(-1,3)
             if len(self.grids)>8: self.grids.pop(next(iter(self.grids)))
-        matrix=self.data.stabilization(t,r)@rot(1,v['yaw'])@rot(0,-v['pitch'])@rot(2,-v['roll'])
+        first,second,stamp=self.frames(t)
+        matrix=self.data.stabilization(stamp,r)@rot(1,v['yaw'])@rot(0,-v['pitch'])@rot(2,-v['roll'])
         directions=self.grids[key]@matrix.T
-        frames=[self.read(self.cap,t),self.read(self.second,t) if self.second is not None else None]
-        if frames[1] is None: frames[1]=frames[0]
+        frames=[first,second]
         output=np.zeros((height,width,3),dtype=np.float32); total=np.zeros((height,width),dtype=np.float32)
         denominator=np.polynomial.polynomial.polyval(100,self.data.poly)
         for i,lens in enumerate(self.data.lenses):

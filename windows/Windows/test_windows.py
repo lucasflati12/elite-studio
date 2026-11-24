@@ -94,6 +94,23 @@ class WindowsTests(unittest.TestCase):
             self.assertGreater(int(front[2]),200); self.assertLess(int(front[0]),20)
             self.assertGreater(int(back[0]),200); self.assertLess(int(back[2]),20)
         finally: renderer.close()
+    def test_stabilization_uses_decoded_frame_time(self):
+        import struct
+        from pano import MAGIC
+        path=self.folder/'timed.insv'
+        subprocess.run([tool('ffmpeg'),'-hide_banner','-loglevel','error','-y',
+            '-f','lavfi','-i','testsrc=s=128x64:r=25:d=2','-c:v','libx264','-g','10','-f','mp4',str(path)],check=True,creationflags=CREATE_FLAGS)
+        info=b'\x12\x04Test'; rec=info+struct.pack('<HI',0x101,len(info))
+        with path.open('ab') as out: out.write(rec+b'\0'*32+struct.pack('<II',len(rec)+72,1)+MAGIC)
+        renderer=PanoRenderer(path); asked=[]
+        original=renderer.data.stabilization
+        renderer.data.stabilization=lambda t,r:(asked.append(t),original(t,r))[1]
+        try:
+            # 30 fps timeline over a 25 fps clip, forwards and with backward seeks
+            for t in [.53,.0,1.21,1.233,.4,1.9]:
+                renderer.render(t,32,18,{'stabilize':True},use_gpu=False)
+                self.assertAlmostEqual(asked[-1],round(t*25)/25,places=6)
+        finally: renderer.close()
     def test_cancel_preserves_output(self):
         p=self.basic(); out=self.folder/'cancel.mp4'; out.write_bytes(b'keep')
         cancel=threading.Event(); cancel.set()

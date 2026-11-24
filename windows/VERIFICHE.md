@@ -9,6 +9,13 @@ Verificato su questo PC Windows il 5 novembre 2026.
 - Provata la codifica H.264 hardware disponibile su questo PC (`h264_qsv`) anche con sottotitoli. La selezione dei driver è automatica; altri dispositivi richiedono la propria verifica.
 - Verificato `Elite Studio.exe` con un progetto il cui percorso contiene spazi; collegamento Desktop aggiornato e associazione `.elitestudio` registrata per l'utente.
 
+## Stabilizzazione 360 (24 novembre 2026)
+
+- Corretto: il giroscopio ora viene letto all'istante del fotogramma decodificato, non all'istante della timeline. Prima i due differivano fino a mezzo fotogramma, e in modo variabile quando gli fps dell'export erano diversi da quelli della camera: ne risultava un tremolio residuo.
+- Misurato su riprese reali Insta360 One R (movimento residuo con stabilizzazione e direzione bloccata, export a 30 fps): clip a 50 fps da 2,53 a 0,78 px/fotogramma; 25 fps da 8,81 a 4,43; 29,97 fps da 1,51 a 1,08 e da 2,51 a 2,24.
+- Il giroscopio spiega circa il 90% della rotazione vista nell'immagine (assi e scala corretti, sincronizzazione ≈ 0 ms); il resto è soprattutto movimento reale e parallasse. Rolling shutter non ancora compensato.
+- 41 test automatici riusciti, compreso quello con riprese reali (`ELITE_TEST_INSV`) e un nuovo test sul tempo del fotogramma; le due prove GUI Qt riuscite.
+
 ## Misurazione indicativa delle prestazioni
 
 Esportazione di un video sintetico 1280×720, 30 fps, durata 3 secondi, senza effetti, su questo PC. Mediana di tre esecuzioni alternate dei sorgenti precedenti e aggiornati, stesso materiale e codifica CPU:
