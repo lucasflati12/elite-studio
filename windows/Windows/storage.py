@@ -38,8 +38,8 @@ def proxy(media,cancel=None):
     part=target.with_suffix('.part.mp4'); prune()
     scale="scale=w='max(2,trunc(iw*min(1,960/max(iw,ih))/2)*2)':h='max(2,trunc(ih*min(1,960/max(iw,ih))/2)*2)'"
     with part.with_suffix('.log').open('w+b') as log:
-        proc=subprocess.Popen([tool('ffmpeg'),'-v','error','-y','-threads','2','-i',media['path'],'-map','0:v:0','-vf',scale,
-                               '-an','-c:v','libx264','-threads','2','-preset','veryfast','-crf','28','-pix_fmt','yuv420p',str(part)],stdout=subprocess.DEVNULL,stderr=log,creationflags=CREATE_FLAGS|getattr(subprocess,'BELOW_NORMAL_PRIORITY_CLASS',0))
+        proc=subprocess.Popen([tool('ffmpeg'),'-v','error','-y','-i',media['path'],'-map','0:v:0','-vf',scale,
+                               '-an','-c:v','libx264','-preset','veryfast','-crf','28','-pix_fmt','yuv420p',str(part)],stdout=subprocess.DEVNULL,stderr=log,creationflags=CREATE_FLAGS|getattr(subprocess,'BELOW_NORMAL_PRIORITY_CLASS',0))
         try:
             while proc.poll() is None:
                 if cancel is not None and cancel.wait(.1): raise RuntimeError('Creazione proxy annullata')

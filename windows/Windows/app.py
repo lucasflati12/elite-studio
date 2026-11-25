@@ -886,6 +886,7 @@ def gui(initial=None):
                 next_index=round(cap.get(cv2.CAP_PROP_POS_FRAMES));delta=index-next_index
                 if 0<=delta<=12:
                     for _ in range(delta): cap.grab()
+                elif delta and self.playing and 0<delta<=fps*3: pass   # running late (heavy 4K/10-bit): show the next frame, a seek would freeze ~1 s
                 elif delta: cap.set(cv2.CAP_PROP_POS_MSEC,t*1000)
                 ok,bgr=cap.read()
                 if not ok: return None
