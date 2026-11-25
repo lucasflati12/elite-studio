@@ -27,9 +27,12 @@ LUMA = np.array([.2126, .7152, .0722])
 # lift (matte blacks), shadows/highlights tint (RGB offsets, luma-neutral), bands = hue-selective
 # tweaks [centre°, width°, hue shift°, sat ×, value ×].
 LOOKS = {
-    'alpine': dict(name='Alpino cinematico', contrast=1.38, pivot=.42, sat=1.12, vibrance=.35, warmth=.10, lift=.015,
-                   shadows=[-.030, .006, .034], highlights=[.034, .012, -.030],
-                   bands=[[35, 32, -4, 1.30, 1.04], [95, 45, -22, .85, .94], [212, 40, 5, 1.22, .86]]),
+    'natural': dict(name='Naturale cinematico', contrast=1.10, pivot=.45, sat=1.0, vibrance=.10, warmth=.03, lift=.008,
+                    shadows=[-.008, .002, .010], highlights=[.010, .004, -.008],
+                    bands=[[35, 32, 0, 1.04, 1.0], [212, 40, 2, 1.06, .97]]),
+    'alpine': dict(name='Alpino cinematico', contrast=1.24, pivot=.43, sat=1.04, vibrance=.18, warmth=.06, lift=.012,
+                   shadows=[-.018, .004, .022], highlights=[.020, .008, -.018],
+                   bands=[[35, 32, -2, 1.12, 1.02], [95, 45, -12, .90, .96], [212, 40, 4, 1.10, .92]]),
     'golden': dict(name='Golden hour', contrast=1.22, pivot=.45, sat=1.10, vibrance=.25, warmth=.38, lift=.02,
                    shadows=[.010, -.004, -.014], highlights=[.045, .018, -.040],
                    bands=[[35, 35, -2, 1.30, 1.06], [100, 45, -28, .80, .96], [215, 40, 0, .95, .96]]),
@@ -46,7 +49,7 @@ LOOKS = {
                shadows=[0, 0, 0], highlights=[0, 0, 0],
                bands=[[215, 50, 0, 1.0, .60], [35, 40, 0, 1.0, 1.12]]),
 }
-DEFAULT_LOOK = 'alpine'
+DEFAULT_LOOK = 'natural'
 NEUTRAL_AUTO = dict(black=0., white=1., gamma=1., wb=[1., 1., 1.], flat=False)
 
 

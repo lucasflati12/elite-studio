@@ -70,12 +70,15 @@ struct Look {
 enum Grading {
     static let size = 33
     static let luma = SIMD3<Double>(0.2126, 0.7152, 0.0722)
-    static let defaultLook = "alpine"
-    static let order = ["alpine", "golden", "moody", "vivid", "film", "bw", "none"]
+    static let defaultLook = "natural"
+    static let order = ["natural", "alpine", "golden", "moody", "vivid", "film", "bw", "none"]
     static let looks: [String: Look] = [
-        "alpine": Look(name: "Alpino cinematico", contrast: 1.38, pivot: 0.42, sat: 1.12, vibrance: 0.35, warmth: 0.10, lift: 0.015,
-                       shadows: [-0.030, 0.006, 0.034], highlights: [0.034, 0.012, -0.030],
-                       bands: [[35, 32, -4, 1.30, 1.04], [95, 45, -22, 0.85, 0.94], [212, 40, 5, 1.22, 0.86]]),
+        "natural": Look(name: "Naturale cinematico", contrast: 1.10, pivot: 0.45, sat: 1.0, vibrance: 0.10, warmth: 0.03, lift: 0.008,
+                        shadows: [-0.008, 0.002, 0.010], highlights: [0.010, 0.004, -0.008],
+                        bands: [[35, 32, 0, 1.04, 1.0], [212, 40, 2, 1.06, 0.97]]),
+        "alpine": Look(name: "Alpino cinematico", contrast: 1.24, pivot: 0.43, sat: 1.04, vibrance: 0.18, warmth: 0.06, lift: 0.012,
+                       shadows: [-0.018, 0.004, 0.022], highlights: [0.020, 0.008, -0.018],
+                       bands: [[35, 32, -2, 1.12, 1.02], [95, 45, -12, 0.90, 0.96], [212, 40, 4, 1.10, 0.92]]),
         "golden": Look(name: "Golden hour", contrast: 1.22, pivot: 0.45, sat: 1.10, vibrance: 0.25, warmth: 0.38, lift: 0.02,
                        shadows: [0.010, -0.004, -0.014], highlights: [0.045, 0.018, -0.040],
                        bands: [[35, 35, -2, 1.30, 1.06], [100, 45, -28, 0.80, 0.96], [215, 40, 0, 0.95, 0.96]]),

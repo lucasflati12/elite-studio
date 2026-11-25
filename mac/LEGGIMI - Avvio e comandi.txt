@@ -37,8 +37,8 @@ COLOR GRADING AUTOMATICO (Cmd+G, menu Colore; Ctrl+G su Windows)
 
 Analizza le clip (livelli, bilanciamento del bianco, esposizione, profilo
 piatto D-Cinelike letto anche dal file .SRT del drone DJI), le uniforma tra
-loro e applica subito il look "Alpino cinematico". Nella finestra scegli
-fra sei look, regoli l'intensità e confronti prima/dopo trascinando la
+loro e applica subito il look "Naturale cinematico". Nella finestra scegli
+fra sette look, regoli l'intensità e confronti prima/dopo trascinando la
 linea gialla. Anteprima ed export usano la stessa LUT 3D; "Esporta LUT
 .cube" la porta in DaVinci Resolve. Stesso risultato su Mac e Windows.
 

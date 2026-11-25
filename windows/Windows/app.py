@@ -44,7 +44,7 @@ def gui(initial=None):
     import cv2
     from pano import PanoRenderer, secondary, primary, view_at, DEFAULT_VIEW
     from PIL import Image
-    from PySide6.QtCore import Qt, QTimer, Signal, QObject, QUrl, QRectF, QPointF
+    from PySide6.QtCore import Qt, QTimer, Signal, QObject, QUrl, QRectF, QPointF, QSize
     from PySide6.QtGui import QColor, QPainter, QPen, QImage, QPixmap, QAction, QKeySequence, QIcon
     from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QVBoxLayout,QHBoxLayout,QSplitter,
         QListWidget,QListWidgetItem,QLabel,QPushButton,QToolBar,QFileDialog,QMessageBox,QFormLayout,
@@ -703,6 +703,7 @@ def gui(initial=None):
             try: project=Project.load(path)
             except Exception as e: self.error(str(e)); return
             self.reset(project); self.fit()
+            if not project.missing: QTimer.singleShot(500,lambda:self.start_proxies(automatic=True))   # 4K: smooth playback
             if project.data.get('reviewStart'): self.seek(float(project.data['reviewStart']))
             if project.missing: self.error('File mancanti dal computer originale. Usa File > Ricollega file mancanti.\n\n'+'\n'.join(project.missing))
         def save(self):
@@ -851,14 +852,18 @@ def gui(initial=None):
                     if not source.is_absolute() and self.project.path: source=self.project.path.parent/source
                     self.captures[key]=cv2.VideoCapture(str(source if source.is_file() else m['path']))
                 cap=self.captures[key]; fps=cap.get(cv2.CAP_PROP_FPS) or 30; index=round(t*fps); old=self.frame_cache.get(key)
-                if old and old[0]==index: return old[1]
+                if old and old[0]==index and old[1]==size: return old[2]
                 next_index=round(cap.get(cv2.CAP_PROP_POS_FRAMES));delta=index-next_index
                 if 0<=delta<=12:
                     for _ in range(delta): cap.grab()
                 elif delta: cap.set(cv2.CAP_PROP_POS_MSEC,t*1000)
                 ok,bgr=cap.read()
                 if not ok: return None
-                im=Image.fromarray(cv2.cvtColor(bgr,cv2.COLOR_BGR2RGBA)); self.frame_cache[key]=(index,im); return im
+                if size:
+                    # Shrink 4K frames here (OpenCV, a few ms) instead of converting the whole frame first (~70 ms).
+                    ih,iw=bgr.shape[:2]; k=max(size[0]/iw,size[1]/ih)
+                    if k<.75: bgr=cv2.resize(bgr,(max(2,round(iw*k)),max(2,round(ih*k))),interpolation=cv2.INTER_LINEAR if self.playing else cv2.INTER_AREA)
+                im=Image.fromarray(cv2.cvtColor(bgr,cv2.COLOR_BGR2RGBA)); self.frame_cache[key]=(index,size,im); return im
             except Exception as e:
                 self.statusBar().showMessage(str(e)); return None
         def render_preview(self):
@@ -905,7 +910,12 @@ def gui(initial=None):
             if not tracks.get('captionsHidden',False):
                 from captions import draw
                 canvas=draw(canvas,self.project.data.get('captions',[]),self.project.data.get('captionStyle',{}),self.position)
-            raw=canvas.tobytes('raw','RGBA'); qimage=QImage(raw,w,h,w*4,QImage.Format.Format_RGBA8888).copy(); self.viewer.setPixmap(QPixmap.fromImage(qimage))
+            raw=canvas.tobytes('raw','RGBA'); qimage=QImage(raw,w,h,w*4,QImage.Format.Format_RGBA8888).copy(); pixmap=QPixmap.fromImage(qimage)
+            box=QSize(max(100,self.viewer.width()-8),max(100,self.viewer.height()-8))
+            if w<box.width() and h<box.height():
+                # Rendered at the preview quality (360/720/960), shown filling the viewer.
+                pixmap=pixmap.scaled(box,Qt.AspectRatioMode.KeepAspectRatio,Qt.TransformationMode.SmoothTransformation)
+            self.viewer.setPixmap(pixmap)
             self.update_clock()
         def zoom(self,factor):
             self.timeline.zoom=max(2,min(500,self.timeline.zoom*factor)); self.timeline.refresh()

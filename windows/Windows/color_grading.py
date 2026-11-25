@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (QCheckBox, QDialog, QFileDialog, QHBoxLayout, QLa
 
 import grading
 
-ORDER = ['alpine', 'golden', 'moody', 'vivid', 'film', 'bw', 'none']
+ORDER = ['natural', 'alpine', 'golden', 'moody', 'vivid', 'film', 'bw', 'none']
 NAMES = {**{k: v['name'] for k, v in grading.LOOKS.items()}, 'none': 'Solo correzione'}
 
 
