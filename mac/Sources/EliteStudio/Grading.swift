@@ -3,6 +3,7 @@ import AVFoundation
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
+import ImageIO
 import simd
 
 // Automatic colour grading. Same JSON (`effects.grade`) and same maths as Windows/grading.py:
@@ -99,7 +100,7 @@ struct GradeCurves: Hashable, Codable {
             if !x.isFinite || !y.isFinite { continue }
             out.append([min(1, max(0, x)), min(1, max(0, y))])
         }
-        out.sort { $0[0] < $1[0] }
+        out.sort { $0[0] == $1[0] ? $0[1] < $1[1] : $0[0] < $1[0] }
         if monotone && out.count > 1 { for i in 1..<out.count { out[i][1] = max(out[i][1], out[i - 1][1]) } }
         return out
     }
@@ -121,7 +122,7 @@ struct GradeHue: Hashable, Codable {
             let y = shift ? min(180, max(-180, p[1])) : min(2, max(0, p[1]))
             out.append([x, y])
         }
-        out.sort { $0[0] < $1[0] }; return out
+        out.sort { $0[0] == $1[0] ? $0[1] < $1[1] : $0[0] < $1[0] }; return out
     }
 }
 struct GradeLUT: Hashable, Codable {
@@ -243,8 +244,9 @@ enum Grading {
         let key = url.path + "|" + String(date.timeIntervalSince1970)
         cubeLock.lock(); let cached = cubeCache[key]; cubeLock.unlock(); if let cached { return cached }
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let source = text.hasPrefix("\u{FEFF}") ? String(text.dropFirst()) : text
         var size1: Int?; var size3: Int?; var lo = SIMD3<Double>(repeating: 0); var hi = SIMD3<Double>(repeating: 1); var rows: [SIMD3<Double>] = []
-        for raw in text.components(separatedBy: .newlines) {
+        for raw in source.components(separatedBy: .newlines) {
             let line = raw.components(separatedBy: "#").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             if line.isEmpty || line.hasPrefix("TITLE") { continue }
             let parts = line.split(whereSeparator: { $0.isWhitespace })
@@ -293,7 +295,7 @@ enum Grading {
     }
     private static func mono(_ x: Double, _ points: [[Double]]) -> Double {
         if points.isEmpty { return x }
-        var p: [[Double]] = [[0, 0]]; p.append(contentsOf: points); p.append([1, 1]); p.sort { $0[0] < $1[0] }
+        var p: [[Double]] = [[0, 0]]; p.append(contentsOf: points); p.append([1, 1]); p.sort { $0[0] == $1[0] ? $0[1] < $1[1] : $0[0] < $1[0] }
         var clean: [[Double]] = []
         for pair in p { if let last = clean.last, pair[0] <= last[0] + 1e-8 { continue }; clean.append([pair[0], min(1, max(0, pair[1]))]) }
         if clean.count < 2 { return x }
@@ -438,7 +440,8 @@ enum Grading {
             for x in 0..<w {
                 let o = (y * w + x) * 4
                 let p = SIMD3<Float>(Float(px[o]), Float(px[o + 1]), Float(px[o + 2])) / 255 * top
-                let i0 = SIMD3<Int>(Int(p.x), Int(p.y), Int(p.z)), i1 = pointwiseMin(i0 &+ 1, SIMD3<Int>(repeating: n - 1))
+                let i0 = SIMD3<Int>(Int(p.x), Int(p.y), Int(p.z))
+                let i1 = SIMD3<Int>(min(i0.x + 1, n - 1), min(i0.y + 1, n - 1), min(i0.z + 1, n - 1))
                 let f = p - SIMD3<Float>(Float(i0.x), Float(i0.y), Float(i0.z))
                 func at(_ r: Int, _ g: Int, _ b: Int) -> SIMD3<Float> { t[(b * n + g) * n + r] }
                 let c00 = simd_mix(at(i0.x, i0.y, i0.z), at(i1.x, i0.y, i0.z), SIMD3(repeating: f.x))

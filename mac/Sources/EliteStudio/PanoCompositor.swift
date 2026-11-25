@@ -96,6 +96,12 @@ final class PanoCompositor: NSObject, AVVideoCompositing, @unchecked Sendable {
 
 /// Metal state shared by every compositor instance.
 final class GPU: @unchecked Sendable {
+    private struct LUTKey: Hashable {
+        let grade: Grade
+        let inputModified: Date?
+        let creativeModified: Date?
+    }
+
     static let shared = GPU()
 
     let device: MTLDevice
@@ -110,7 +116,7 @@ final class GPU: @unchecked Sendable {
     private let captionLock = NSLock()
     private var captionTextures: [String: MTLTexture] = [:]
     private let lutLock = NSLock()
-    private var luts: [Grade: MTLTexture] = [:]
+    private var luts: [LUTKey: MTLTexture] = [:]
     private var identityLUT: MTLTexture?
 
     init?() {
@@ -169,6 +175,7 @@ final class GPU: @unchecked Sendable {
             guard let pb = request.sourceFrame(byTrackID: l.trackID), let (src, r1) = texture(pb) else { continue }
             keep.append(r1)
             if l.kind == .flat {
+                guard let lut = lutTexture(e.grade) else { enc.endEncoding(); return false }
                 let inv = l.transform.concatenating(placement).inverted()
                 var u: [SIMD4<Float>] = [
                     SIMD4(Float(inv.a), Float(inv.b), Float(inv.c), Float(inv.d)),
@@ -177,10 +184,11 @@ final class GPU: @unchecked Sendable {
                     SIMD4(Float(e.exposure), Float(e.contrast), Float(e.saturation), Float(e.temperature)),
                 ]
                 enc.setComputePipelineState(flat)
-                enc.setTexture(src, index: 0); enc.setTexture(acc, index: 1); enc.setTexture(lutTexture(e.grade), index: 2)
+                enc.setTexture(src, index: 0); enc.setTexture(acc, index: 1); enc.setTexture(lut, index: 2)
                 enc.setBytes(&u, length: MemoryLayout<SIMD4<Float>>.stride * u.count, index: 0)
                 enc.dispatchThreadgroups(grid, threadsPerThreadgroup: tg)
             } else if let p = l.pano, p.lenses.count == 2 {
+                guard let lut = lutTexture(e.grade) else { enc.endEncoding(); return false }
                 var src2 = src
                 if l.trackID2 != kCMPersistentTrackID_Invalid {
                     guard let pb2 = request.sourceFrame(byTrackID: l.trackID2), let (t2, r2) = texture(pb2) else { continue }
@@ -193,7 +201,7 @@ final class GPU: @unchecked Sendable {
                 u.append(SIMD4(Float(e.exposure), Float(e.contrast), Float(e.saturation), Float(e.temperature)))
                 enc.setComputePipelineState(pano)
                 enc.setTexture(src, index: 0); enc.setTexture(src2, index: 1); enc.setTexture(acc, index: 2)
-                enc.setTexture(lutTexture(e.grade), index: 3)
+                enc.setTexture(lut, index: 3)
                 enc.setBytes(&u, length: MemoryLayout<SIMD4<Float>>.stride * u.count, index: 0)
                 enc.dispatchThreadgroups(grid, threadsPerThreadgroup: tg)
             }
@@ -228,18 +236,37 @@ final class GPU: @unchecked Sendable {
     private func lutTexture(_ grade: Grade?) -> MTLTexture? {
         lutLock.lock(); defer { lutLock.unlock() }
         let key = grade?.normalized
-        if let key, let t = luts[key] { return t }
+        let cacheKey: LUTKey?
+        if let key {
+            func stamp(_ spec: GradeLUT) -> Date? {
+                guard !spec.path.isEmpty else { return nil }
+                let path = (spec.path as NSString).expandingTildeInPath
+                let attributes = try? FileManager.default.attributesOfItem(atPath: path)
+                return attributes?[.modificationDate] as? Date
+            }
+            let textureKey = LUTKey(grade: key, inputModified: stamp(key.inputLut), creativeModified: stamp(key.creativeLut))
+            cacheKey = textureKey
+            if let t = luts[textureKey] { return t }
+        } else {
+            cacheKey = nil
+        }
         if key == nil, let t = identityLUT { return t }
         let n = key == nil ? 1 : Grading.size
         let d = MTLTextureDescriptor()
         d.textureType = .type3D; d.pixelFormat = .rgba32Float; d.width = n; d.height = n; d.depth = n; d.usage = [.shaderRead]
         guard let t = device.makeTexture(descriptor: d) else { return nil }
-        let data: [SIMD4<Float>] = key.map { g in Grading.table(g).map { v in SIMD4<Float>(v, 1) } } ?? [SIMD4<Float>(0, 0, 0, 1)]
+        let data: [SIMD4<Float>]
+        if let key {
+            let table = Grading.table(key)
+            data = table.map { SIMD4<Float>($0, 1) }
+        } else {
+            data = [SIMD4<Float>(0, 0, 0, 1)]
+        }
         data.withUnsafeBytes {
             t.replace(region: MTLRegionMake3D(0, 0, 0, n, n, n), mipmapLevel: 0, slice: 0, withBytes: $0.baseAddress!,
                       bytesPerRow: n * MemoryLayout<SIMD4<Float>>.stride, bytesPerImage: n * n * MemoryLayout<SIMD4<Float>>.stride)
         }
-        if let key { if luts.count > 32 { luts.removeAll() }; luts[key] = t } else { identityLUT = t }
+        if let cacheKey { if luts.count > 32 { luts.removeAll() }; luts[cacheKey] = t } else { identityLUT = t }
         return t
     }
 
