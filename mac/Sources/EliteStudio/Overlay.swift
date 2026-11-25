@@ -1,7 +1,7 @@
 import AppKit
 import CoreText
 
-/// Draws the Coppa Élite name/tag cards and the logo, at frame-pixel size.
+/// Draws the Coppa Élite name/tag cards at frame-pixel size.
 /// The same images are used by the viewer and by the export, so they match exactly.
 enum Overlay {
     static let night = NSColor(srgbRed: 9 / 255, green: 26 / 255, blue: 46 / 255, alpha: 224 / 255)
@@ -178,36 +178,4 @@ enum Overlay {
         }
     }
 
-    // MARK: - logo
-
-    private static var logoCache: (key: String, image: CGImage)?
-    private static var logoSource: CGImage? = {
-        guard let u = Bundle.main.url(forResource: "coppa-elite-logo", withExtension: "png"),
-              let img = NSImage(contentsOf: u)?.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
-        return img
-    }()
-
-    static func logo(settings s: SequenceSettings) -> Element? {
-        guard s.showLogo, let src = logoSource else { return nil }
-        let frame = s.size
-        let k = unit(frame)
-        let side = CGFloat(s.logoSize) * k
-        let key = "\(side)"
-        let img: CGImage
-        if let c = logoCache, c.key == key { img = c.image } else {
-            guard let r = render(CGSize(width: side, height: side), { ctx in
-                ctx.interpolationQuality = .high
-                ctx.saveGState()
-                ctx.translateBy(x: 0, y: side); ctx.scaleBy(x: 1, y: -1)
-                ctx.draw(src, in: CGRect(x: 0, y: 0, width: side, height: side))
-                ctx.restoreGState()
-            }) else { return nil }
-            img = r
-            logoCache = (key, r)
-        }
-        let margin = 44 * k
-        let x = s.logoRight ? frame.width - side - margin : margin
-        let y = CGFloat(s.logoY) / 1920 * frame.height
-        return Element(image: img, rect: CGRect(x: x, y: y, width: side, height: side), delay: 0)
-    }
 }

@@ -15,21 +15,9 @@ APP="Elite Studio.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/EliteStudio"
-cp Resources/*.woff Resources/coppa-elite-logo.png "$APP/Contents/Resources/"
+cp Resources/*.woff "$APP/Contents/Resources/"
 
-# Keep the compact app icon when rebuilding; the tournament logo remains a media asset.
-if [[ -f Resources/AppIcon.icns ]]; then
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-else
-# icon from the logo
-ICONSET="$SCRATCH/AppIcon.iconset"
-rm -rf "$ICONSET"; mkdir -p "$ICONSET"
-for s in 16 32 128 256 512; do
-  sips -z $s $s Resources/coppa-elite-logo.png --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
-  sips -z $((s*2)) $((s*2)) Resources/coppa-elite-logo.png --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
-done
-iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
-fi
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

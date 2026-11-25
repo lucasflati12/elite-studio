@@ -180,7 +180,7 @@ def build_ui(editor,Viewer,Bin,Timeline):
     action('Apri versione precedente come copia',e.restore_version,None,file)
     color_menu=e.menuBar().addMenu('Colore')
     from color_grading import open_window
-    action('Color grading automatico…',lambda:open_window(e),'Ctrl+G',color_menu)
+    action('Colore…',lambda:open_window(e),'Ctrl+G',color_menu)
     performance=e.menuBar().addMenu('Fluidità')
     action('Crea proxy delle clip selezionate',e.start_proxies,None,performance)
     action('Interrompi preparazione proxy',e.cancel_proxies,None,performance)
@@ -234,12 +234,6 @@ def build_ui(editor,Viewer,Bin,Timeline):
     def fps_changed(index):
         e.checkpoint(); e.project.settings['fps']=[24,25,30,50,60][index]; e.changed()
     e.fps_combo.activated.connect(fps_changed); sf.addRow('Fotogrammi',e.fps_combo); sq.addWidget(seqform)
-    sq.addWidget(section('LOGO')); e.logo=QCheckBox('Logo Coppa Élite'); e.logo.toggled.connect(e.toggle_logo); sq.addWidget(e.logo)
-    logo_form=QFormLayout(); e.logo_fields={}
-    for key,label,lo,hi,default in [('logoSize','Dimensione',20,800,190),('logoY','Distanza dall’alto',0,1920,320)]:
-        field=QDoubleSpinBox(); field.setRange(lo,hi); field.setValue(default); field.setDecimals(0)
-        field.editingFinished.connect(e.edit_logo); e.logo_fields[key]=field; logo_form.addRow(label,field)
-    e.logo_right=QCheckBox('Logo a destra'); e.logo_right.toggled.connect(e.edit_logo); logo_form.addRow(e.logo_right); sq.addLayout(logo_form)
     sq.addWidget(section('INFO')); e.project_info=muted(); sq.addWidget(e.project_info); sq.addWidget(muted('Seleziona una clip per modificarla.')); il.addWidget(e.sequence_panel)
     e.clip_panel=QWidget(); cp=QVBoxLayout(e.clip_panel); cp.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize); cp.setContentsMargins(0,0,0,0); cp.setSpacing(4); cp.addWidget(section('CLIP'))
     e.name=QLabel(); e.name.setWordWrap(True); e.name.setStyleSheet('font-weight:600; font-size:11px;'); cp.addWidget(e.name)

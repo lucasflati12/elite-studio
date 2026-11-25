@@ -176,7 +176,7 @@ struct EffectsInspector: View {
                 Button("Incrociata con precedente") { editor.crossfadeSelection() }
             }
             DisclosureGroup("Colore") {
-                Button("Color grading automatico…") { GradingWindow.show(editor) }
+                Button("Colore…") { GradingWindow.show(editor) }
                 if let g = c.effects.grade { Text("Look: \(Grading.name(g.look)) · \(Int((g.amount * 100).rounded()))%").font(.caption).foregroundStyle(.secondary) }
                 ValueSlider(title: "Esposizione", value: bind(\.exposure), range: -3...3)
                 ValueSlider(title: "Contrasto", value: bind(\.contrast), range: 0.2...2)

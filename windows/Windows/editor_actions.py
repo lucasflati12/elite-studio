@@ -5,12 +5,6 @@ from captions import DEFAULT_STYLE,retime,set_text,chunks,transcribe
 
 
 class EditingActions:
-    def edit_logo(self):
-        if self.updating: return
-        values={k:field.value() for k,field in self.logo_fields.items()}; values['logoRight']=self.logo_right.isChecked()
-        if all(self.project.settings.get(k,{'logoSize':190,'logoY':320,'logoRight':True}[k])==v for k,v in values.items()): return
-        self.checkpoint(); self.project.settings.update(values); self.changed()
-
     def edit_title_layout(self):
         c=self.selected_clip()
         if self.updating or not c or 'title' not in c: return
@@ -23,8 +17,6 @@ class EditingActions:
         c=self.selected_clip(); title=c.get('title',{}) if c else {}
         for key,field in self.title_fields.items(): field.setValue(title.get(key,dict(x=.056,y=.693,size=1,fade=.4)[key]))
         self.title_show_label.setChecked(title.get('showLabel',True))
-        for key,field in self.logo_fields.items(): field.setValue(self.project.settings.get(key,190 if key=='logoSize' else 320))
-        self.logo_right.setChecked(self.project.settings.get('logoRight',True))
 
     def apply_title_style(self):
         c=self.selected_clip()

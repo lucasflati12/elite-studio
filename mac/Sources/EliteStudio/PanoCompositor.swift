@@ -198,7 +198,7 @@ final class GPU: @unchecked Sendable {
                 enc.dispatchThreadgroups(grid, threadsPerThreadgroup: tg)
             }
         }
-        // captions, then (export only) titles and logo on top
+        // captions, then (export only) titles on top
         var stamps: [CaptionTrack.State] = []
         if let st = ins.captions?.state(at: time) { stamps.append(st) }
         if let o = ins.overlays { stamps += o.states(at: time) }

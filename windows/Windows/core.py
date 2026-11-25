@@ -62,7 +62,7 @@ def probe(path):
 
 class Project:
     def __init__(self):
-        self.data = {'format': 'elitestudio/1', 'settings': {'width': 1080, 'height': 1920, 'fps': 30, 'showLogo': False},
+        self.data = {'format': 'elitestudio/1', 'settings': {'width': 1080, 'height': 1920, 'fps': 30},
                      'tracks': {'videoHidden': [False, False], 'audioMuted': [False, False], 'titlesHidden': False}, 'media': [], 'clips': []}
         self.path = None
         self.missing = []
@@ -402,14 +402,6 @@ def _export(project, output, progress=lambda value: None, cancel=None, hevc=Fals
                 graph.append(f'[{index}:a]asetpts=PTS-STARTPTS,{atempo(speed)},atrim=duration={c["duration"]},{audio_filters(c)},aresample=48000,aformat=channel_layouts=stereo,adelay={delay}|{delay},apad,atrim=duration={duration}[a{index}]')
                 audio.append(f'[a{index}]')
             index+=1
-        if project.settings.get('showLogo'):
-            logo=ROOT/'Resources/coppa-elite-logo.png'
-            args+=['-loop','1','-i',str(logo)]
-            lw=max(1,round(float(project.settings.get('logoSize',190))*w/1080))
-            ly=round(float(project.settings.get('logoY',320))*h/1920)
-            lx=f'W-w-{round(40*w/1080)}' if project.settings.get('logoRight',True) else str(round(40*w/1080))
-            graph+=[f'[{index}:v]scale={lw}:-1[logo]',f'[{previous}][logo]overlay=x={lx}:y={ly}:shortest=1[branded]']
-            previous='branded'
         graph.append(''.join(audio)+f'amix=inputs={len(audio)}:duration=first:dropout_transition=0,volume={len(audio)},alimiter=limit=0.95[audio]')
         partial=Path(tmp)/'render.mp4'
         filter_file=Path(tmp)/'filters.txt'; filter_file.write_text(';'.join(graph),encoding='utf-8')

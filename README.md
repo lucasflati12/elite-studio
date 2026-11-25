@@ -13,7 +13,7 @@ A lightweight video editor I built for my own reels — and the workflow where a
 | [`mac/`](mac/) | macOS (Apple Silicon, macOS 26+) | Swift / SwiftUI + AVFoundation, no external dependencies |
 | [`windows/`](windows/) | Windows 10/11 | Python 3.10+ / PySide6 (Qt), OpenCV, faster-whisper; FFmpeg on PATH |
 
-Features: two video lanes (V1/V2), audio levels, automatic captions, title overlays, Insta360 360° reframing (Mac), and a command line to check/export projects without opening the UI.
+Features: two video lanes (V1/V2), audio levels, automatic captions, title overlays, basic colour grading with a shared 3D LUT, Insta360 360° reframing (Mac), and a command line to check/export projects without opening the UI.
 
 ## Mac — quick start
 

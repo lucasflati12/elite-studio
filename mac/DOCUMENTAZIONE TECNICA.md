@@ -1,7 +1,7 @@
 # Elite Studio (Mac)
 
 Lightweight video editor for the Coppa Élite interviews: bin, viewer, timeline (V1/V2 + A1/A2 + titles),
-razor, trim, ripple delete, Coppa Élite name cards and logo, MP4 export. Native Swift + AVFoundation, ~1.5 MB.
+razor, trim, ripple delete, Coppa Élite name cards, MP4 export. Native Swift + AVFoundation, ~1.5 MB.
 
 - App: `Elite Studio.app` (double-click; `.elitestudio` files open in it)
 - Rebuild after code changes: `./build.sh`
@@ -35,7 +35,7 @@ Only `clips` is required. Everything left out gets a sensible default.
 
 ```json
 {
-  "settings": { "width": 1080, "height": 1920, "fps": 30, "showLogo": true },
+  "settings": { "width": 1080, "height": 1920, "fps": 30 },
   "clips": [
     { "media": "IMG_7450.mov", "in": 7.04, "out": 21.3 },
     { "media": "IMG_7450.mov", "in": 25.0, "out": 40.2 },
@@ -64,8 +64,8 @@ Only `clips` is required. Everything left out gets a sensible default.
 `label` (default `"COPPA ÉLITE  /  WINTER EDITION"`), `showLabel`, `x` / `y` (top-left of the card as a fraction of the frame, default 0.056 / 0.693),
 `size` (1 = normal), `fade` (seconds, default 0.4).
 
-**Settings** (all optional): `width`/`height` (default: follows the first clip, vertical → 1080×1920), `fps` (30),
-`showLogo`, `logoRight`, `logoSize` (px at 1080 wide), `logoY` (px from the top at 1920 tall).
+**Settings** (all optional): `width`/`height` (default: follows the first clip, vertical → 1080×1920), `fps` (30).
+Legacy logo settings are ignored.
 
 When the app saves, it writes the full form (ids, media list with durations, relative paths). Both forms read the same way.
 
@@ -105,7 +105,7 @@ Ripple deletes and speed changes move the captions with the cut. "Parole per fra
 Looks: **Negativo** (the text has no colour: it shows the video inverted, a difference blend), **Bianco** (white, black outline),
 **Oro** (white, the word being spoken in Coppa Élite gold). Position, size, capitals and the pop-in animation apply to all captions.
 Captions are drawn by the GPU compositor (`PanoCompositor`), so viewer and export match; when that compositor is used the export
-also draws titles and logo on the GPU (`OverlayTrack`), because Core Animation on top of a custom compositor comes out white.
+also draws titles on the GPU (`OverlayTrack`), because Core Animation on top of a custom compositor comes out white.
 Code: `Captions.swift`.
 
 JSON (top level, both optional):

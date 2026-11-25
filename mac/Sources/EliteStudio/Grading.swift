@@ -34,17 +34,21 @@ struct Grade: Hashable, Codable {
     var correct = true
     var match = true
     var auto = GradeAuto()
-    enum K: String, CodingKey { case look, amount, correct, match, auto }
+    var wheels = GradeWheels()
+    var basic = GradeBasic()
+    enum K: String, CodingKey { case look, amount, correct, match, auto, wheels, basic }
     init() {}
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)
         look = c.get(.look, Grading.defaultLook); amount = c.get(.amount, 1); correct = c.get(.correct, true)
         match = c.get(.match, true); auto = c.get(.auto, GradeAuto())
+        wheels = c.get(.wheels, GradeWheels()); basic = c.get(.basic, GradeBasic())
     }
     func encode(to e: Encoder) throws {
         var c = e.container(keyedBy: K.self)
         try c.encode(look, forKey: .look); try c.encode(amount, forKey: .amount); try c.encode(correct, forKey: .correct)
         try c.encode(match, forKey: .match); try c.encode(auto, forKey: .auto)
+        try c.encode(wheels, forKey: .wheels); try c.encode(basic, forKey: .basic)
     }
 
     /// Mirrors grading.normalized(): clamped values, unknown look -> default.
@@ -56,8 +60,30 @@ struct Grade: Hashable, Codable {
         g.auto.black = num(auto.black, 0, 0.4, 0); g.auto.white = num(auto.white, 0.5, 1.1, 1); g.auto.gamma = num(auto.gamma, 0.5, 2, 1)
         g.auto.wb = auto.wb.count == 3 ? auto.wb.map { num($0, 0.8, 1.25, 1) } : [1, 1, 1]
         g.auto.median = nil; g.match = false          // not part of the picture
+        g.wheels.lift = g.wheels.lift.count == 3 ? g.wheels.lift.map { num($0, -0.25, 0.25, 0) } : [0, 0, 0]
+        g.wheels.gamma = g.wheels.gamma.count == 3 ? g.wheels.gamma.map { num($0, -0.25, 0.25, 0) } : [0, 0, 0]
+        g.wheels.gain = g.wheels.gain.count == 3 ? g.wheels.gain.map { num($0, -0.25, 0.25, 0) } : [0, 0, 0]
+        g.wheels.offset = g.wheels.offset.count == 3 ? g.wheels.offset.map { num($0, -0.25, 0.25, 0) } : [0, 0, 0]
+        g.basic.temperature = num(g.basic.temperature, -1, 1, 0); g.basic.tint = num(g.basic.tint, -1, 1, 0)
+        g.basic.exposure = num(g.basic.exposure, -5, 5, 0); g.basic.contrast = num(g.basic.contrast, 0, 2, 1)
+        g.basic.pivot = num(g.basic.pivot, 0.05, 0.95, 0.5); g.basic.highlights = num(g.basic.highlights, -1, 1, 0)
+        g.basic.shadows = num(g.basic.shadows, -1, 1, 0); g.basic.whites = num(g.basic.whites, -1, 1, 0)
+        g.basic.blacks = num(g.basic.blacks, -1, 1, 0); g.basic.saturation = num(g.basic.saturation, 0, 2, 1)
+        g.basic.vibrance = num(g.basic.vibrance, -1, 1, 0)
         return g
     }
+}
+
+struct GradeWheels: Hashable, Codable {
+    var lift: [Double] = [0, 0, 0]
+    var gamma: [Double] = [0, 0, 0]
+    var gain: [Double] = [0, 0, 0]
+    var offset: [Double] = [0, 0, 0]
+}
+
+struct GradeBasic: Hashable, Codable {
+    var temperature = 0.0, tint = 0.0, exposure = 0.0, contrast = 1.0, pivot = 0.5
+    var highlights = 0.0, shadows = 0.0, whites = 0.0, blacks = 0.0, saturation = 1.0, vibrance = 0.0
 }
 
 struct Look {
@@ -173,7 +199,25 @@ enum Grading {
     }
 
     static func apply(_ c: SIMD3<Double>, _ g: Grade) -> SIMD3<Double> {
-        let base = g.correct ? correct(c, g.auto) : clamp01(c)
+        var base = g.correct ? correct(c, g.auto) : clamp01(c)
+        let b = g.basic
+        if b != GradeBasic() || g.wheels != GradeWheels() {
+            base *= pow(2, b.exposure)
+            base = (base - SIMD3(repeating: b.pivot)) * b.contrast + SIMD3(repeating: b.pivot)
+            let lum = simd_dot(base, luma)
+            base += SIMD3(repeating: b.shadows * pow(1 - min(1, max(0, lum)), 2) + b.highlights * pow(min(1, max(0, lum)), 2))
+            base += SIMD3(repeating: b.blacks * (1 - min(1, max(0, lum * 4))) + b.whites * min(1, max(0, (lum - 0.75) * 4)))
+            base *= SIMD3(1 + 0.12 * b.temperature, 1 + 0.08 * b.tint, 1 - 0.12 * b.temperature)
+            let chroma = max(base.x, base.y, base.z) - min(base.x, base.y, base.z)
+            base = saturate(base, b.saturation * (1 + b.vibrance * min(1, max(0, 1 - chroma * 2.5))))
+            let y = min(1, max(0, simd_dot(base, luma)))
+            // Wheel offsets: x + lift + gamma*(1-Y) + gain*Y + offset; all vectors are RGB.
+            base += SIMD3(g.wheels.lift[0], g.wheels.lift[1], g.wheels.lift[2])
+            base += SIMD3(g.wheels.gamma[0], g.wheels.gamma[1], g.wheels.gamma[2]) * (1 - y)
+            base += SIMD3(g.wheels.gain[0], g.wheels.gain[1], g.wheels.gain[2]) * y
+            base += SIMD3(g.wheels.offset[0], g.wheels.offset[1], g.wheels.offset[2])
+            base = clamp01(base)
+        }
         guard g.look != "none", g.amount > 0, let L = looks[g.look] else { return base }
         return clamp01(base + (look(base, L) - base) * g.amount)
     }
@@ -332,6 +376,7 @@ final class GradingModel: ObservableObject {
     let targets: [ID]
     @Published var look = Grading.defaultLook
     @Published var amount = 1.0
+    @Published var basic = GradeBasic()
     @Published var correct = true { didSet { if correct != oldValue { apply() } } }
     @Published var match = true { didSet { if match != oldValue { apply() } } }
     @Published var focus: ID?
@@ -353,7 +398,7 @@ final class GradingModel: ObservableObject {
         targets = chosen.sorted { ($0.start, $0.track) < ($1.start, $1.track) }.map(\.id)
         focus = targets.first
         if let g = chosen.compactMap(\.effects.grade).first {
-            look = g.look; amount = g.amount; correct = g.correct; match = g.match
+            look = g.look; amount = g.amount; correct = g.correct; match = g.match; basic = g.basic
         }
     }
 
@@ -397,6 +442,7 @@ final class GradingModel: ObservableObject {
 
     func grade(for id: ID, look l: String? = nil, amount a: Double? = nil, autos: [String: GradeAuto]? = nil) -> Grade {
         var g = Grade(); g.look = l ?? look; g.amount = ((a ?? amount) * 1000).rounded() / 1000; g.correct = correct; g.match = match
+        g.basic = basic
         if let p = media(id)?.url.path { g.auto = (autos ?? self.autos())[p] ?? GradeAuto() }
         return g
     }
@@ -527,7 +573,7 @@ struct GradingView: View {
                 }.frame(height: 128)
             }
             VStack(alignment: .leading, spacing: 10) {
-                Text("COLOR GRADING").font(.headline).foregroundStyle(.yellow)
+                Text("COLORE").font(.headline).foregroundStyle(.yellow)
                 Text("Clip coinvolte").font(.caption).foregroundStyle(.secondary)
                 List(model.targets, id: \.self, selection: Binding(get: { model.focus }, set: { model.focus = $0; model.focusChanged() })) { id in
                     Text("\(model.media(id)?.name ?? "?")  ·  \(model.note(id))").font(.caption).lineLimit(1)
@@ -539,6 +585,14 @@ struct GradingView: View {
                     if !editing { model.amount = sliding; model.apply() }
                 })
                 .onChange(of: sliding) { _, v in Task { await model.refresh(thumbnails: false, previewAmount: v) } }
+                Text("Base").font(.subheadline.bold())
+                GradeSlider(title: "Temperatura", value: $model.basic.temperature, range: -1...1) { model.apply() }
+                GradeSlider(title: "Tinta", value: $model.basic.tint, range: -1...1) { model.apply() }
+                GradeSlider(title: "Esposizione", value: $model.basic.exposure, range: -5...5) { model.apply() }
+                GradeSlider(title: "Contrasto", value: $model.basic.contrast, range: 0...2) { model.apply() }
+                GradeSlider(title: "Luci", value: $model.basic.highlights, range: -1...1) { model.apply() }
+                GradeSlider(title: "Ombre", value: $model.basic.shadows, range: -1...1) { model.apply() }
+                GradeSlider(title: "Saturazione", value: $model.basic.saturation, range: 0...2) { model.apply() }
                 Button("Applica di nuovo / rianalizza") { model.start(force: true) }
                 Button("Esporta LUT .cube (DaVinci)…") { model.exportCube() }
                 Button("Rimuovi grading") { model.remove() }
@@ -551,6 +605,26 @@ struct GradingView: View {
     }
 }
 
+struct GradeSlider: View {
+    let title: String
+    @Binding var value: Double
+    let range: ClosedRange<Double>
+    let onCommit: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(title).font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Text(String(format: "%.2f", value)).font(.caption.monospacedDigit())
+            }
+            Slider(value: $value, in: range, onEditingChanged: { editing in
+                if !editing { onCommit() }
+            }).controlSize(.small)
+        }
+    }
+}
+
 @MainActor
 enum GradingWindow {
     private static var window: NSWindow?
@@ -560,7 +634,7 @@ enum GradingWindow {
         let model = GradingModel(editor: editor)
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1120, height: 680), styleMask: [.titled, .closable, .resizable, .miniaturizable],
                          backing: .buffered, defer: false)
-        w.title = "Color grading automatico"; w.isReleasedWhenClosed = false
+        w.title = "Colore"; w.isReleasedWhenClosed = false
         w.contentView = NSHostingView(rootView: GradingView(model: model))
         w.center(); w.makeKeyAndOrderFront(nil); window = w
     }

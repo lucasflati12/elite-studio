@@ -271,7 +271,7 @@ struct ViewerView: View {
     }
 }
 
-/// Live preview of name cards and the logo, drawn with the same images the export uses.
+/// Live preview of name cards, drawn with the same images the export uses.
 struct OverlayPreview: View {
     @ObservedObject var editor: Editor
     @ObservedObject var clock: PlaybackClock
@@ -282,7 +282,6 @@ struct OverlayPreview: View {
             let frame = p.settings.size
             let k = geo.size.width / frame.width
             ZStack(alignment: .topLeading) {
-                if let logo = Overlay.logo(settings: p.settings) { element(logo, k: k, alpha: 1, dx: 0) }
                 if !p.tracks.titlesHidden {
                     ForEach(p.clips.filter { $0.isTitle && $0.start <= clock.time && clock.time < $0.end }) { c in
                         let card = c.title!
@@ -551,14 +550,6 @@ struct SequenceInspector: View {
         }
         Picker("Fotogrammi", selection: bind(\.fps)) {
             Text("24 fps").tag(24); Text("25 fps").tag(25); Text("30 fps").tag(30); Text("60 fps").tag(60)
-        }
-        header("LOGO")
-        Toggle("Logo Coppa Élite", isOn: bind(\.showLogo))
-        if editor.project.settings.showLogo {
-            Picker("", selection: bind(\.logoRight)) { Text("Sinistra").tag(false); Text("Destra").tag(true) }
-                .pickerStyle(.segmented).labelsHidden()
-            ValueSlider(title: "Dimensione", value: bind(\.logoSize), range: 80...400) { "\(Int($0)) px" }
-            ValueSlider(title: "Distanza dall'alto", value: bind(\.logoY), range: 0...1600) { "\(Int($0)) px" }
         }
         CaptionStyleControls(editor: editor)
         header("INFO")

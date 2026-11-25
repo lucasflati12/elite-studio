@@ -68,7 +68,7 @@ class Bridge(QObject):
 class GradingWindow(QDialog):
     def __init__(self, editor):
         super().__init__(editor); self.e = editor
-        self.setWindowTitle('Color grading automatico'); self.resize(1120, 700); self.setModal(False)
+        self.setWindowTitle('Colore'); self.resize(1120, 700); self.setModal(False)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.targets = self.pick_targets(); self.focus = None; self.source = None; self.busy = False
         cached = getattr(editor, 'grade_analysis', None)
@@ -76,7 +76,8 @@ class GradingWindow(QDialog):
         self.analysis = cached
         first = next((c.get('effects', {}).get('grade') for c in self.targets if grading.active(c.get('effects', {}))), None)
         self.state = dict(look=first.get('look', grading.DEFAULT_LOOK), amount=float(first.get('amount', 1)), correct=bool(first.get('correct', True)),
-                          match=bool(first.get('match', True))) if first else dict(look=grading.DEFAULT_LOOK, amount=1., correct=True, match=True)
+                          match=bool(first.get('match', True)),
+                          basic=copy.deepcopy(first.get('basic', grading.normalized({})['basic'])), wheels=copy.deepcopy(first.get('wheels', grading.normalized({})['wheels']))) if first else dict(look=grading.DEFAULT_LOOK, amount=1., correct=True, match=True, basic=grading.normalized({})['basic'], wheels=grading.normalized({})['wheels'])
 
         root = QHBoxLayout(self)
         left = QVBoxLayout(); root.addLayout(left, 3)
@@ -90,13 +91,19 @@ class GradingWindow(QDialog):
         self.looks.currentItemChanged.connect(self.look_chosen); left.addWidget(self.looks)
 
         panel = QWidget(); panel.setFixedWidth(300); right = QVBoxLayout(panel); right.setContentsMargins(0, 0, 0, 0); root.addWidget(panel)
-        title = QLabel('COLOR GRADING'); title.setStyleSheet('color:#e4ca4a;font-weight:bold;font-size:13px'); right.addWidget(title)
+        title = QLabel('COLORE'); title.setStyleSheet('color:#e4ca4a;font-weight:bold;font-size:13px'); right.addWidget(title)
         right.addWidget(QLabel('Clip coinvolte'))
         self.clips = QListWidget(); self.clips.currentItemChanged.connect(self.clip_focused); right.addWidget(self.clips, 1)
         self.correct = QCheckBox('Correzione automatica\n(livelli, bilanciamento, profilo D-Cinelike)'); self.correct.setChecked(self.state['correct'])
         self.match = QCheckBox('Uniforma le clip tra loro'); self.match.setChecked(self.state['match'])
         self.correct.toggled.connect(lambda v: self.set_state(correct=v)); self.match.toggled.connect(lambda v: self.set_state(match=v))
         right.addWidget(self.correct); right.addWidget(self.match)
+        self.basic_sliders = {}
+        for key, label, lo, hi, initial in [('temperature','Temperatura',-100,100,0),('tint','Tinta',-100,100,0),('exposure','Esposizione',-500,500,0),('contrast','Contrasto',0,200,100),('highlights','Luci',-100,100,0),('shadows','Ombre',-100,100,0),('whites','Bianchi',-100,100,0),('blacks','Neri',-100,100,0),('saturation','Saturazione',0,200,100),('vibrance','Vividezza',-100,100,0)]:
+            right.addWidget(QLabel(label)); slider=QSlider(Qt.Orientation.Horizontal); slider.setRange(lo,hi)
+            value=self.state['basic'].get(key,initial/100 if key not in ('contrast','saturation') else initial/100)
+            slider.setValue(round(value*100)); slider.sliderReleased.connect(lambda k=key,s=slider:self.edit_basic(k,s.value()/100))
+            right.addWidget(slider); self.basic_sliders[key]=slider
         self.amount_label = QLabel(); right.addWidget(self.amount_label)
         self.amount = QSlider(Qt.Orientation.Horizontal); self.amount.setRange(0, 150); self.amount.setValue(round(self.state['amount'] * 100))
         self.amount.valueChanged.connect(self.amount_moving); self.amount.sliderReleased.connect(lambda: self.set_state(amount=self.amount.value() / 100))
@@ -171,7 +178,11 @@ class GradingWindow(QDialog):
     def grade_for(self, c, autos=None, **override):
         s = {**self.state, **override}; autos = autos if autos is not None else self.autos()
         auto = autos.get(self.media(c)['path'], grading.NEUTRAL_AUTO)
-        return dict(look=s['look'], amount=round(s['amount'], 3), correct=s['correct'], match=s['match'], auto=copy.deepcopy(auto))
+        return dict(look=s['look'], amount=round(s['amount'], 3), correct=s['correct'], match=s['match'], auto=copy.deepcopy(auto), basic=copy.deepcopy(s['basic']), wheels=copy.deepcopy(s['wheels']))
+
+    def edit_basic(self, key, value):
+        basic=copy.deepcopy(self.state['basic']); basic[key]=value
+        self.set_state(basic=basic)
 
     def apply(self):
         if not self.targets: return

@@ -10,7 +10,7 @@ Per i test aggiunti: `python -m unittest -v test_windows test_parity test_essent
 
 Doppio clic su **Elite Studio - Windows** sul Desktop oppure **Start Elite Studio.bat** nella cartella principale. La guida completa e `../LEGGIMI - Avvio e comandi.txt`, disponibile dal menu Aiuto.
 
-L'interfaccia segue la versione Mac: progetto, viewer, ispettore e tracce T/V2/V1/A1/A2/CC. Include selezione multipla/rettangolare, trascinamento e copia/incolla di gruppi, rifilatura Q/W, ripple delete, chiusura degli spazi, J/K/L, titoli e logo configurabili, Insta360 e sottotitoli modificabili.
+L'interfaccia segue la versione Mac: progetto, viewer, ispettore e tracce T/V2/V1/A1/A2/CC. Include selezione multipla/rettangolare, trascinamento e copia/incolla di gruppi, rifilatura Q/W, ripple delete, chiusura degli spazi, J/K/L, titoli, Insta360 e sottotitoli modificabili.
 
 I sottotitoli condividono JSON e stili con Mac: Negativo, Bianco, Oro, animazione pop e tempi per parola. Viewer ed export usano la stessa funzione di disegno. La trascrizione locale usa [faster-whisper](https://github.com/SYSTRAN/faster-whisper), modello base CPU int8. Scarica il modello al primo uso, poi funziona senza connessione.
 

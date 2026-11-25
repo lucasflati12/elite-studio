@@ -333,7 +333,7 @@ final class CaptionTrack: @unchecked Sendable {
     }
 }
 
-/// Titles and logo for exports that go through the GPU compositor (same images and animation as the viewer).
+/// Titles for exports that go through the GPU compositor (same images and animation as the viewer).
 final class OverlayTrack: @unchecked Sendable {
     private struct Item {
         let key: String
@@ -348,9 +348,6 @@ final class OverlayTrack: @unchecked Sendable {
     init?(project p: Project) {
         let frame = p.settings.size
         var items: [Item] = []
-        if let logo = Overlay.logo(settings: p.settings), let b = OverlayTrack.bitmap(logo.image, rect: logo.rect) {
-            items.append(Item(key: "logo|\(logo.rect)", bitmap: b, start: 0, duration: .infinity, delay: 0, fade: 0, unit: 1, animated: false))
-        }
         if !p.tracks.titlesHidden {
             for c in p.clips where c.isTitle {
                 guard let card = c.title else { continue }

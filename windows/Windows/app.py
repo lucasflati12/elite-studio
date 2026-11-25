@@ -341,8 +341,8 @@ def gui(initial=None):
             for _ in range(2):
                 player=QMediaPlayer(self); output=QAudioOutput(self); player.setAudioOutput(output); self.audio.append([player,output,None])
             self.setWindowTitle('Elite Studio · Windows'); self.resize(1280,800)
-            logo=ROOT/'Resources/coppa-elite-logo.png'
-            if logo.exists(): self.setWindowIcon(QIcon(str(logo)))
+            icon=ROOT.parent/'assets'/'icon.png'
+            if icon.exists(): self.setWindowIcon(QIcon(str(icon)))
             self.build_ui()
             from playback import SequencePreview
             self.sequence_preview=SequencePreview(self.viewer,self)
@@ -430,7 +430,7 @@ def gui(initial=None):
             title=c.get('title',{}) if c else {}
             for widget,key,default in [(self.title_names,'names',''),(self.title_tag,'tag','MVP'),(self.title_label,'label','COPPA ÉLITE  /  WINTER EDITION')]:
                 value=title.get(key,default); widget.setText(('\n'.join(value) if isinstance(value,list) else value).replace('\n',' | ')); widget.setEnabled(bool(c and 'title' in c))
-            self.logo.setChecked(self.project.settings.get('showLogo',False)); tracks=self.project.data['tracks']
+            tracks=self.project.data['tracks']
             for lane in range(2):
                 for key in ['videoHidden','audioMuted']: getattr(self,f'{key}{lane}').setChecked(tracks[key][lane])
             w,h=self.project.settings['width'],self.project.settings['height']
@@ -535,9 +535,6 @@ def gui(initial=None):
             new=dict(names=self.title_names.text().replace(' | ','\n').replace('|','\n'),tag=self.title_tag.text(),label=self.title_label.text())
             if all(c['title'].get(k)==v for k,v in new.items()): return
             self.checkpoint(); c['title'].update(new); self.changed()
-        def toggle_logo(self,value):
-            if self.updating: return
-            self.checkpoint(); self.project.settings['showLogo']=value; self.changed()
         def toggle_track(self,key,lane,value):
             if self.updating: return
             self.checkpoint(); self.project.data['tracks'][key][lane]=value; self.changed()
@@ -898,12 +895,6 @@ def gui(initial=None):
                     opacity=max(0,min(1,motion['opacity']*envelope(c,self.position-c['start'])))
                     if opacity<1: image.putalpha(image.getchannel('A').point(lambda x:int(x*opacity)))
                     canvas.alpha_composite(image,(round((w-sw)/2+motion['x']*w),round((h-sh)/2+motion['y']*h)))
-            if self.project.settings.get('showLogo'):
-                with Image.open(ROOT/'Resources/coppa-elite-logo.png') as logo:
-                    logo=logo.convert('RGBA'); lw=max(1,round(self.project.settings.get('logoSize',190)*w/1080))
-                    logo=logo.resize((lw,max(1,round(lw*logo.height/logo.width))),Image.Resampling.LANCZOS)
-                    lx=w-lw-round(40*w/1080) if self.project.settings.get('logoRight',True) else round(40*w/1080)
-                    canvas.alpha_composite(logo,(lx,round(self.project.settings.get('logoY',320)*h/1920)))
             if warning:
                 from PIL import ImageDraw
                 ImageDraw.Draw(canvas).text((10,12),'Media unavailable: see the status bar',fill='#ffcb65')

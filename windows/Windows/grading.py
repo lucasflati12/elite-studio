@@ -67,7 +67,16 @@ def normalized(grade):
     wb = [num(x, .8, 1.25, 1.) for x in wb] if isinstance(wb, list) and len(wb) == 3 else [1., 1., 1.]
     auto = dict(black=num(a.get('black'), 0, .4, 0.), white=num(a.get('white'), .5, 1.1, 1.), gamma=num(a.get('gamma'), .5, 2, 1.),
                 wb=wb, flat=bool(a.get('flat', False)))
-    return dict(look=look, amount=num(grade.get('amount', 1), 0, 1.5, 1.), correct=bool(grade.get('correct', True)), auto=auto)
+    wheels = grade.get('wheels') if isinstance(grade.get('wheels'), dict) else {}
+    wheel = lambda k: [num(x, -.25, .25, 0.) for x in wheels.get(k, [0, 0, 0])] if isinstance(wheels.get(k, [0, 0, 0]), list) and len(wheels.get(k, [0, 0, 0])) == 3 else [0., 0., 0.]
+    basic = grade.get('basic') if isinstance(grade.get('basic'), dict) else {}
+    return dict(look=look, amount=num(grade.get('amount', 1), 0, 1.5, 1.), correct=bool(grade.get('correct', True)), auto=auto,
+                wheels={k: wheel(k) for k in ('lift', 'gamma', 'gain', 'offset')},
+                basic={k: num(basic.get(k, d), lo, hi, d) for k, d, lo, hi in (
+                    ('temperature', 0., -1., 1.), ('tint', 0., -1., 1.), ('exposure', 0., -5., 5.),
+                    ('contrast', 1., 0., 2.), ('pivot', .5, .05, .95), ('highlights', 0., -1., 1.),
+                    ('shadows', 0., -1., 1.), ('whites', 0., -1., 1.), ('blacks', 0., -1., 1.),
+                    ('saturation', 1., 0., 2.), ('vibrance', 0., -1., 1.))})
 
 
 def _rgb_to_hsv(rgb):
@@ -143,6 +152,21 @@ def apply(rgb, grade):
     g = normalized(grade)
     if g is None: return rgb
     base = correct(rgb, g['auto']) if g['correct'] else np.clip(rgb, 0, 1)
+    b = g['basic']
+    if b != dict(temperature=0., tint=0., exposure=0., contrast=1., pivot=.5, highlights=0., shadows=0., whites=0., blacks=0., saturation=1., vibrance=0.) or any(any(v) for v in g['wheels'].values()):
+        base = base * (2 ** b['exposure'])
+        base = (base - b['pivot']) * b['contrast'] + b['pivot']
+        lum = base @ LUMA
+        base += (b['shadows'] * (1 - np.clip(lum, 0, 1)) ** 2 + b['highlights'] * np.clip(lum, 0, 1) ** 2)[..., None]
+        base += (b['blacks'] * (1 - np.clip(lum * 4, 0, 1)) + b['whites'] * np.clip((lum - .75) * 4, 0, 1))[..., None]
+        base *= np.array([1 + .12 * b['temperature'], 1 + .08 * b['tint'], 1 - .12 * b['temperature']])
+        base = _saturate(base, (b['saturation'] * (1 + b['vibrance'] * np.clip(1 - (base.max(-1)-base.min(-1))*2.5, 0, 1)))[..., None])
+        lum = np.clip(base @ LUMA, 0, 1)
+        # Wheel offsets: x + lift + gamma*(1-Y) + gain*Y + offset; all vectors are RGB.
+        for k, scale in (('lift', np.ones_like(lum)), ('gamma', 1. - lum), ('gain', lum)):
+            base += np.asarray(g['wheels'][k]) * scale[..., None]
+        base += np.asarray(g['wheels']['offset'])
+        base = np.clip(base, 0, 1)
     if g['look'] == 'none' or g['amount'] <= 0: return base
     out = look(base, LOOKS[g['look']])
     return np.clip(base + (out - base) * g['amount'], 0, 1)

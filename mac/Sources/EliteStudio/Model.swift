@@ -71,10 +71,6 @@ struct SequenceSettings: Hashable {
     var width = 1080
     var height = 1920
     var fps = 30
-    var showLogo = false
-    var logoRight = true
-    var logoSize = 190.0          // px at 1080 wide
-    var logoY = 320.0             // px from top at 1920 high
     var customized = false        // false = follow the first clip's orientation
 
     var size: CGSize { CGSize(width: width, height: height) }
@@ -326,21 +322,18 @@ extension TitleCard: Codable {
 }
 
 extension SequenceSettings: Codable {
-    enum K: String, CodingKey { case width, height, fps, showLogo, logoRight, logoSize, logoY, customized }
+    enum K: String, CodingKey { case width, height, fps, customized }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)
         let def = SequenceSettings()
         width = c.get(.width, def.width); height = c.get(.height, def.height); fps = c.get(.fps, def.fps)
-        showLogo = c.get(.showLogo, def.showLogo); logoRight = c.get(.logoRight, def.logoRight)
-        logoSize = c.get(.logoSize, def.logoSize); logoY = c.get(.logoY, def.logoY)
         // a file that states its size is treated as a deliberate choice
         customized = c.get(.customized, c.contains(.width) || c.contains(.height))
     }
     func encode(to e: Encoder) throws {
         var c = e.container(keyedBy: K.self)
         try c.encode(width, forKey: .width); try c.encode(height, forKey: .height); try c.encode(fps, forKey: .fps)
-        try c.encode(showLogo, forKey: .showLogo); try c.encode(logoRight, forKey: .logoRight)
-        try c.encode(logoSize, forKey: .logoSize); try c.encode(logoY, forKey: .logoY); try c.encode(customized, forKey: .customized)
+        try c.encode(customized, forKey: .customized)
     }
 }
 

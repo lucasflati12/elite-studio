@@ -33,7 +33,7 @@ tracce aggiuntive e dissolvenze incrociate. L'ispettore contiene colore,
 dissolvenze, keyframe e volume automatico. Il menu File offre il
 ricollegamento dei file spostati e la cronologia dei progetti.
 
-COLOR GRADING AUTOMATICO (Cmd+G, menu Colore; Ctrl+G su Windows)
+COLORE (Cmd+G, menu Colore; Ctrl+G su Windows)
 
 Analizza le clip (livelli, bilanciamento del bianco, esposizione, profilo
 piatto D-Cinelike letto anche dal file .SRT del drone DJI), le uniforma tra
@@ -41,6 +41,8 @@ loro e applica subito il look "Naturale cinematico". Nella finestra scegli
 fra sette look, regoli l'intensità e confronti prima/dopo trascinando la
 linea gialla. Anteprima ed export usano la stessa LUT 3D; "Esporta LUT
 .cube" la porta in DaVinci Resolve. Stesso risultato su Mac e Windows.
+Temperatura, tinta, esposizione, contrasto, luci, ombre e saturazione
+sono disponibili nella sezione Base.
 
 I progetti .elitestudio possono passare tra Windows e Mac. Tieni progetto
 e media insieme per conservare i percorsi relativi. Se i file sono stati

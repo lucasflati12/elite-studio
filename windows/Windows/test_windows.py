@@ -64,7 +64,7 @@ class WindowsTests(unittest.TestCase):
         sound=np.frombuffer(pcm,dtype='<f4')
         self.assertGreater(np.std(sound[6000:18000]),.02)
         self.assertLess(np.std(sound[56000:64000]),.003)
-    def test_title_only_and_logo_export(self):
+    def test_title_only_ignores_legacy_logo_setting(self):
         p=Project(); p.settings.update(width=320,height=180,fps=12,showLogo=True,logoY=10)
         p.clips.append(dict(id='title',track=2,start=0,duration=.5,**{'in':0},title=dict(names=['Andrea','Test'],fade=0)))
         out=self.folder/'titles.mp4'; export(p,out)

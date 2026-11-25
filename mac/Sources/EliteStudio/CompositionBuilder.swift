@@ -111,7 +111,7 @@ enum CompositionBuilder {
             .concatenating(CGAffineTransform(translationX: tx, y: ty))
     }
 
-    /// `burnOverlays`: export only. The viewer draws titles and logo itself on top of the video.
+    /// `burnOverlays`: export only. The viewer draws title cards itself on top of the video.
     static func videoComposition(_ b: BuiltComposition, project p: Project, cache: MediaCache, burnOverlays: Bool = false) -> AVMutableVideoComposition? {
         guard b.hasVideo else { return nil }
         let frame = p.settings.size
@@ -251,13 +251,13 @@ enum CompositionBuilder {
         return mix
     }
 
-    // MARK: - export overlays (titles + logo burned in with Core Animation)
+    // MARK: - export title overlays
 
     static func addOverlays(to vc: AVMutableVideoComposition, project p: Project) {
-        // with the GPU compositor the titles and logo are drawn by it (OverlayTrack); Core Animation on top of it comes out white
+        // with the GPU compositor titles are drawn by OverlayTrack; Core Animation on top comes out white
         guard vc.customVideoCompositorClass == nil else { return }
         let hasTitles = !p.tracks.titlesHidden && p.clips.contains(where: { $0.isTitle })
-        guard p.settings.showLogo || hasTitles else { return }
+        guard hasTitles else { return }
         let frame = p.settings.size
         let parent = CALayer()
         parent.frame = CGRect(origin: .zero, size: frame)
@@ -273,8 +273,6 @@ enum CompositionBuilder {
             l.frame = CGRect(x: e.rect.minX, y: frame.height - e.rect.maxY, width: e.rect.width, height: e.rect.height)
             return l
         }
-
-        if let logo = Overlay.logo(settings: p.settings) { parent.addSublayer(layer(logo)) }
 
         if !p.tracks.titlesHidden {
             let k = Overlay.unit(frame)
