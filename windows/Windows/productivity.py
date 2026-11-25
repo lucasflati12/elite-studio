@@ -237,6 +237,7 @@ def build_effects(e,layout):
         button=QPushButton(label); button.clicked.connect(callback); row.addWidget(button)
     outer.addLayout(row); e.motion_ease=QCheckBox('Movimento morbido'); e.motion_ease.toggled.connect(e.set_motion_ease); outer.addWidget(e.motion_ease)
     outer.addWidget(muted('Aggiungi un keyframe, sposta il cursore, modifica scala, posizione, rotazione, opacità o volume.'))
-    for text,callback in [('Dissolvenza incrociata con precedente',e.apply_crossfade),('Regola automaticamente il volume',e.normalize_volume),('Reimposta effetti e animazione',e.reset_effects)]:
+    from color_grading import open_window
+    for text,callback in [('Color grading automatico…',lambda:open_window(e)),('Dissolvenza incrociata con precedente',e.apply_crossfade),('Regola automaticamente il volume',e.normalize_volume),('Reimposta effetti e animazione',e.reset_effects)]:
         button=QPushButton(text); button.clicked.connect(callback); outer.addWidget(button)
     layout.addWidget(e.effects_panel)

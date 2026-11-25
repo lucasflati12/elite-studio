@@ -23,8 +23,9 @@ struct ClipEffects: Hashable, Codable {
     var fadeIn = 0.0, fadeOut = 0.0, audioFadeIn = 0.0, audioFadeOut = 0.0, rotation = 0.0
     var ease = "smooth"
     var keys: [MotionKey] = []
+    var grade: Grade? = nil               // automatic colour grading (Grading.swift), applied before the sliders above
     init() {}
-    enum K: String, CodingKey { case exposure, contrast, saturation, temperature, fadeIn, fadeOut, audioFadeIn, audioFadeOut, rotation, ease, keys }
+    enum K: String, CodingKey { case exposure, contrast, saturation, temperature, fadeIn, fadeOut, audioFadeIn, audioFadeOut, rotation, ease, keys, grade }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)
         exposure = min(3, max(-3, c.get(.exposure, 0))); contrast = min(2, max(0.2, c.get(.contrast, 1)))
@@ -33,6 +34,7 @@ struct ClipEffects: Hashable, Codable {
         audioFadeIn = max(0, c.get(.audioFadeIn, 0)); audioFadeOut = max(0, c.get(.audioFadeOut, 0))
         rotation = c.get(.rotation, 0); ease = c.get(.ease, "smooth")
         keys = Array(c.get(.keys, [MotionKey]()).prefix(1000)).sorted { $0.t < $1.t }
+        if let g = try? c.decodeIfPresent(Grade.self, forKey: .grade) { grade = g }
     }
     func encode(to e: Encoder) throws {
         var c = e.container(keyedBy: K.self)
@@ -41,8 +43,9 @@ struct ClipEffects: Hashable, Codable {
         try c.encode(fadeIn, forKey: .fadeIn); try c.encode(fadeOut, forKey: .fadeOut)
         try c.encode(audioFadeIn, forKey: .audioFadeIn); try c.encode(audioFadeOut, forKey: .audioFadeOut)
         try c.encode(rotation, forKey: .rotation); try c.encode(ease, forKey: .ease); try c.encode(keys, forKey: .keys)
+        try c.encodeIfPresent(grade, forKey: .grade)
     }
-    var needsGPU: Bool { exposure != 0 || contrast != 1 || saturation != 1 || temperature != 0 || fadeIn > 0 || fadeOut > 0 || rotation != 0 || !keys.isEmpty }
+    var needsGPU: Bool { exposure != 0 || contrast != 1 || saturation != 1 || temperature != 0 || fadeIn > 0 || fadeOut > 0 || rotation != 0 || !keys.isEmpty || grade != nil }
 }
 
 extension Clip {
@@ -173,6 +176,8 @@ struct EffectsInspector: View {
                 Button("Incrociata con precedente") { editor.crossfadeSelection() }
             }
             DisclosureGroup("Colore") {
+                Button("Color grading automatico…") { GradingWindow.show(editor) }
+                if let g = c.effects.grade { Text("Look: \(Grading.name(g.look)) · \(Int((g.amount * 100).rounded()))%").font(.caption).foregroundStyle(.secondary) }
                 ValueSlider(title: "Esposizione", value: bind(\.exposure), range: -3...3)
                 ValueSlider(title: "Contrasto", value: bind(\.contrast), range: 0.2...2)
                 ValueSlider(title: "Saturazione", value: bind(\.saturation), range: 0...2)

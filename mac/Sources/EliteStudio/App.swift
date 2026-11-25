@@ -158,6 +158,9 @@ struct EliteStudioApp: App {
                 Button("Incolla") { Commands.typing ? Commands.send("paste:") : editor.paste() }.keyboardShortcut("v")
                 Button("Seleziona tutto") { Commands.typing ? Commands.send("selectAll:") : editor.selectAll() }.keyboardShortcut("a")
             }
+            CommandMenu("Colore") {
+                Button("Color grading automatico…") { GradingWindow.show(editor) }.keyboardShortcut("g")
+            }
             CommandMenu("Sequenza") {
                 Button("Taglia al playhead") { editor.addEdit() }.keyboardShortcut("k")
                 Button("Aggiungi titolo") { editor.addTitle() }.keyboardShortcut("t")

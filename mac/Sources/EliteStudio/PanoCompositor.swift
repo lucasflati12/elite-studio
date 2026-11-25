@@ -109,6 +109,9 @@ final class GPU: @unchecked Sendable {
     private var accum: MTLTexture?
     private let captionLock = NSLock()
     private var captionTextures: [String: MTLTexture] = [:]
+    private let lutLock = NSLock()
+    private var luts: [Grade: MTLTexture] = [:]
+    private var identityLUT: MTLTexture?
 
     init?() {
         guard let d = MTLCreateSystemDefaultDevice(), let q = d.makeCommandQueue() else { return nil }
@@ -174,7 +177,7 @@ final class GPU: @unchecked Sendable {
                     SIMD4(Float(e.exposure), Float(e.contrast), Float(e.saturation), Float(e.temperature)),
                 ]
                 enc.setComputePipelineState(flat)
-                enc.setTexture(src, index: 0); enc.setTexture(acc, index: 1)
+                enc.setTexture(src, index: 0); enc.setTexture(acc, index: 1); enc.setTexture(lutTexture(e.grade), index: 2)
                 enc.setBytes(&u, length: MemoryLayout<SIMD4<Float>>.stride * u.count, index: 0)
                 enc.dispatchThreadgroups(grid, threadsPerThreadgroup: tg)
             } else if let p = l.pano, p.lenses.count == 2 {
@@ -190,6 +193,7 @@ final class GPU: @unchecked Sendable {
                 u.append(SIMD4(Float(e.exposure), Float(e.contrast), Float(e.saturation), Float(e.temperature)))
                 enc.setComputePipelineState(pano)
                 enc.setTexture(src, index: 0); enc.setTexture(src2, index: 1); enc.setTexture(acc, index: 2)
+                enc.setTexture(lutTexture(e.grade), index: 3)
                 enc.setBytes(&u, length: MemoryLayout<SIMD4<Float>>.stride * u.count, index: 0)
                 enc.dispatchThreadgroups(grid, threadsPerThreadgroup: tg)
             }
@@ -218,6 +222,25 @@ final class GPU: @unchecked Sendable {
         cb.waitUntilCompleted()
         _ = keep
         return cb.status == .completed
+    }
+
+    /// 3D LUT of a clip's colour grade (1×1×1 = none: the shader skips it).
+    private func lutTexture(_ grade: Grade?) -> MTLTexture? {
+        lutLock.lock(); defer { lutLock.unlock() }
+        let key = grade?.normalized
+        if let key, let t = luts[key] { return t }
+        if key == nil, let t = identityLUT { return t }
+        let n = key == nil ? 1 : Grading.size
+        let d = MTLTextureDescriptor()
+        d.textureType = .type3D; d.pixelFormat = .rgba32Float; d.width = n; d.height = n; d.depth = n; d.usage = [.shaderRead]
+        guard let t = device.makeTexture(descriptor: d) else { return nil }
+        let data: [SIMD4<Float>] = key.map { g in Grading.table(g).map { v in SIMD4<Float>(v, 1) } } ?? [SIMD4<Float>(0, 0, 0, 1)]
+        data.withUnsafeBytes {
+            t.replace(region: MTLRegionMake3D(0, 0, 0, n, n, n), mipmapLevel: 0, slice: 0, withBytes: $0.baseAddress!,
+                      bytesPerRow: n * MemoryLayout<SIMD4<Float>>.stride, bytesPerImage: n * n * MemoryLayout<SIMD4<Float>>.stride)
+        }
+        if let key { if luts.count > 32 { luts.removeAll() }; luts[key] = t } else { identityLUT = t }
+        return t
     }
 
     /// GPU copy of a caption bitmap, kept while the same phrase is on screen.
@@ -280,6 +303,21 @@ final class GPU: @unchecked Sendable {
         return clamp(mix(float3(gray), rgb, e.z), 0.0, 1.0);
     }
 
+    // Colour grade LUT (Grading.swift), red fastest along x. Width 1 = no grade.
+    static float3 lut3(texture3d<float, access::read> lut, float3 c) {
+        uint n = lut.get_width();
+        if (n < 2) return c;
+        float3 p = clamp(c, 0.0, 1.0) * float(n - 1);
+        uint3 a = min(uint3(floor(p)), uint3(n - 2));
+        float3 f = p - float3(a);
+        uint3 b = a + 1;
+        float3 x00 = mix(lut.read(uint3(a.x, a.y, a.z)).rgb, lut.read(uint3(b.x, a.y, a.z)).rgb, f.x);
+        float3 x10 = mix(lut.read(uint3(a.x, b.y, a.z)).rgb, lut.read(uint3(b.x, b.y, a.z)).rgb, f.x);
+        float3 x01 = mix(lut.read(uint3(a.x, a.y, b.z)).rgb, lut.read(uint3(b.x, a.y, b.z)).rgb, f.x);
+        float3 x11 = mix(lut.read(uint3(a.x, b.y, b.z)).rgb, lut.read(uint3(b.x, b.y, b.z)).rgb, f.x);
+        return mix(mix(x00, x10, f.y), mix(x01, x11, f.y), f.z);
+    }
+
     kernel void clearAcc(texture2d<half, access::write> acc [[texture(0)]], uint2 g [[thread_position_in_grid]]) {
         if (g.x >= acc.get_width() || g.y >= acc.get_height()) return;
         acc.write(half4(0, 0, 0, 1), g);
@@ -293,7 +331,7 @@ final class GPU: @unchecked Sendable {
 
     // u[0] = inverse transform a b c d, u[1] = tx ty srcW srcH, u[2].x = opacity
     kernel void flatLayer(texture2d<float, access::sample> src [[texture(0)]], texture2d<half, access::read_write> acc [[texture(1)]],
-                          constant float4 *u [[buffer(0)]], uint2 g [[thread_position_in_grid]]) {
+                          texture3d<float, access::read> lut [[texture(2)]], constant float4 *u [[buffer(0)]], uint2 g [[thread_position_in_grid]]) {
         if (g.x >= acc.get_width() || g.y >= acc.get_height()) return;
         float2 p = float2(g) + 0.5;
         float2 s = float2(u[0].x * p.x + u[0].z * p.y + u[1].x, u[0].y * p.x + u[0].w * p.y + u[1].y);
@@ -302,7 +340,7 @@ final class GPU: @unchecked Sendable {
         float4 c = src.sample(smp, s);
         half4 d = acc.read(g);
         // source alpha counts (ProRes 4444 overlays on V2); normal video has alpha 1
-        acc.write(half4(half3(mix(float3(d.rgb), grade(c.rgb, u[3]), u[2].x * c.a)), 1.0h), g);
+        acc.write(half4(half3(mix(float3(d.rgb), grade(lut3(lut, c.rgb), u[3]), u[2].x * c.a)), 1.0h), g);
     }
 
     // Caption on top of the picture. u[0] = rect x y w h (frame px), u[1] = scale, alpha, mode (1 = difference / "negativo")
@@ -340,7 +378,7 @@ final class GPU: @unchecked Sendable {
     }
 
     kernel void panoLayer(texture2d<float, access::sample> lens0 [[texture(0)]], texture2d<float, access::sample> lens1 [[texture(1)]],
-                          texture2d<half, access::read_write> acc [[texture(2)]],
+                          texture2d<half, access::read_write> acc [[texture(2)]], texture3d<float, access::read> lut [[texture(3)]],
                           constant float4 *u [[buffer(0)]], uint2 g [[thread_position_in_grid]]) {
         if (g.x >= acc.get_width() || g.y >= acc.get_height()) return;
         float2 pix = float2(g) + 0.5;
@@ -363,7 +401,7 @@ final class GPU: @unchecked Sendable {
         if (ws <= 0) return;
         float3 c = (c0.rgb * w0 + c1.rgb * w1) / ws;
         half4 old = acc.read(g);
-        acc.write(half4(half3(mix(float3(old.rgb), grade(c, u[18]), u[3].w)), 1.0h), g);
+        acc.write(half4(half3(mix(float3(old.rgb), grade(lut3(lut, c), u[18]), u[3].w)), 1.0h), g);
     }
     """
 }

@@ -11,6 +11,7 @@ RANGES=dict(exposure=(-3,3),contrast=(.2,2),saturation=(0,2),temperature=(-1,1),
 
 def validate(e):
     if not isinstance(e,dict): raise ValueError('Effetti clip non validi')
+    if 'grade' in e and not isinstance(e['grade'],dict): raise ValueError('Color grading non valido')
     for key,(lo,hi) in RANGES.items():
         if key in e and (not math.isfinite(float(e[key])) or not lo<=float(e[key])<=hi): raise ValueError(f'Effetto {key} fuori intervallo')
     keys=e.get('keys',[])
@@ -53,6 +54,8 @@ def _lut(exposure,contrast,temperature):
 def color(image,e):
     from PIL import Image,ImageEnhance
     exposure=float(e.get('exposure',0)); contrast=float(e.get('contrast',1)); saturation=float(e.get('saturation',1)); temp=float(e.get('temperature',0))
+    import grading
+    if grading.active(e): image=grading.pil(image,e['grade'])
     if (exposure,contrast,saturation,temp)==(0.,1.,1.,0.): return image
     alpha=image.getchannel('A'); rgb=image.convert('RGB')
     if exposure or contrast!=1 or temp: rgb=rgb.point(_lut(exposure,contrast,temp))
@@ -77,7 +80,8 @@ def expression(c,key,time='t'):
 
 
 def color_filters(e):
-    out=[]; exp=float(e.get('exposure',0)); con=float(e.get('contrast',1)); temp=float(e.get('temperature',0)); sat=float(e.get('saturation',1))
+    import grading
+    out=[grading.ffmpeg_filter(e['grade'])] if grading.active(e) else []; exp=float(e.get('exposure',0)); con=float(e.get('contrast',1)); temp=float(e.get('temperature',0)); sat=float(e.get('saturation',1))
     if exp or con!=1 or temp:
         expressions=[f"{ch}='clip((val*{2**exp*gain:.8f}-127.5)*{con:.8f}+127.5,0,255)'" for ch,gain in zip('rgb',(1+.15*temp,1,1-.15*temp))]
         out.append('lutrgb='+':'.join(expressions))

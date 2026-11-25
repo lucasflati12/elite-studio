@@ -1,0 +1,268 @@
+"""Automatic colour grading: per-clip analysis + creative looks baked into one 3D LUT.
+
+Shared with mac/Sources/EliteStudio/Grading.swift: same JSON (`effects.grade`), same maths,
+so a project graded on one platform looks the same on the other.
+
+    grade = {'look': 'alpine', 'amount': 1.0, 'correct': True,
+             'auto': {'black': .06, 'white': .86, 'gamma': .9, 'wb': [1.02, 1, .97], 'flat': True}}
+
+The LUT is a pure function of `grade`: preview (PIL Color3DLUT) and export (FFmpeg lut3d)
+use the very same table.
+"""
+from __future__ import annotations
+import hashlib
+import json
+import math
+import os
+import re
+from functools import lru_cache
+from pathlib import Path
+
+import numpy as np
+
+SIZE = 33
+LUMA = np.array([.2126, .7152, .0722])
+
+# Each look: contrast (S-curve slope at the pivot), pivot, sat, vibrance, warmth (-1..1),
+# lift (matte blacks), shadows/highlights tint (RGB offsets, luma-neutral), bands = hue-selective
+# tweaks [centre°, width°, hue shift°, sat ×, value ×].
+LOOKS = {
+    'alpine': dict(name='Alpino cinematico', contrast=1.38, pivot=.42, sat=1.12, vibrance=.35, warmth=.10, lift=.015,
+                   shadows=[-.030, .006, .034], highlights=[.034, .012, -.030],
+                   bands=[[35, 32, -4, 1.30, 1.04], [95, 45, -22, .85, .94], [212, 40, 5, 1.22, .86]]),
+    'golden': dict(name='Golden hour', contrast=1.22, pivot=.45, sat=1.10, vibrance=.25, warmth=.38, lift=.02,
+                   shadows=[.010, -.004, -.014], highlights=[.045, .018, -.040],
+                   bands=[[35, 35, -2, 1.30, 1.06], [100, 45, -28, .80, .96], [215, 40, 0, .95, .96]]),
+    'moody': dict(name='Moody nordico', contrast=1.30, pivot=.45, sat=.72, vibrance=0, warmth=-.22, lift=.045,
+                  shadows=[-.022, .004, .028], highlights=[-.006, .004, .010],
+                  bands=[[35, 35, 6, .70, .95], [100, 50, 18, .55, .90], [210, 45, 4, 1.10, .82]]),
+    'vivid': dict(name='Naturale vivido', contrast=1.18, pivot=.45, sat=1.18, vibrance=.40, warmth=.04, lift=0,
+                  shadows=[0, 0, 0], highlights=[0, 0, 0],
+                  bands=[[215, 40, 0, 1.15, .94]]),
+    'film': dict(name='Pellicola vintage', contrast=1.16, pivot=.45, sat=.86, vibrance=.10, warmth=.18, lift=.07,
+                 shadows=[-.010, .022, .012], highlights=[.030, .016, -.026],
+                 bands=[[35, 35, 4, 1.10, 1.0], [100, 45, 14, .80, .95], [210, 45, -10, .80, .95]]),
+    'bw': dict(name='Bianco e nero drammatico', contrast=1.50, pivot=.42, sat=0, vibrance=0, warmth=0, lift=.01,
+               shadows=[0, 0, 0], highlights=[0, 0, 0],
+               bands=[[215, 50, 0, 1.0, .60], [35, 40, 0, 1.0, 1.12]]),
+}
+DEFAULT_LOOK = 'alpine'
+NEUTRAL_AUTO = dict(black=0., white=1., gamma=1., wb=[1., 1., 1.], flat=False)
+
+
+def normalized(grade):
+    """Validated copy with every field present (missing or broken values fall back to neutral)."""
+    if not isinstance(grade, dict): return None
+    look = grade.get('look', DEFAULT_LOOK)
+    if look not in LOOKS and look != 'none': look = DEFAULT_LOOK
+    def num(v, lo, hi, fallback):
+        try: v = float(v)
+        except (TypeError, ValueError): return fallback
+        return min(hi, max(lo, v)) if math.isfinite(v) else fallback
+    a = grade.get('auto') if isinstance(grade.get('auto'), dict) else {}
+    wb = a.get('wb', [1, 1, 1])
+    wb = [num(x, .8, 1.25, 1.) for x in wb] if isinstance(wb, list) and len(wb) == 3 else [1., 1., 1.]
+    auto = dict(black=num(a.get('black'), 0, .4, 0.), white=num(a.get('white'), .5, 1.1, 1.), gamma=num(a.get('gamma'), .5, 2, 1.),
+                wb=wb, flat=bool(a.get('flat', False)))
+    return dict(look=look, amount=num(grade.get('amount', 1), 0, 1.5, 1.), correct=bool(grade.get('correct', True)), auto=auto)
+
+
+def _rgb_to_hsv(rgb):
+    mx = rgb.max(-1); mn = rgb.min(-1); d = mx - mn
+    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    safe = np.where(d > 1e-9, d, 1)
+    h = np.where(mx == r, ((g - b) / safe) % 6, np.where(mx == g, (b - r) / safe + 2, (r - g) / safe + 4)) * 60
+    h = np.where(d > 1e-9, h, 0)
+    s = np.where(mx > 1e-9, d / np.where(mx > 1e-9, mx, 1), 0)
+    return h, s, mx
+
+
+def _hsv_to_rgb(h, s, v):
+    h = (h % 360) / 60; c = v * s; x = c * (1 - np.abs(h % 2 - 1)); m = v - c
+    z = np.zeros_like(h); i = np.floor(h).astype(int) % 6
+    r = np.choose(i, [c, x, z, z, x, c]); g = np.choose(i, [x, c, c, x, z, z]); b = np.choose(i, [z, z, x, c, c, x])
+    return np.stack([r + m, g + m, b + m], -1)
+
+
+def _smooth(e0, e1, x):
+    t = np.clip((x - e0) / (e1 - e0), 0, 1)
+    return t * t * (3 - 2 * t)
+
+
+def _curve(x, a, p):
+    """Per-channel S-curve: slope a at pivot p, fixed 0 and 1, monotonic."""
+    x = np.clip(x, 0, 1)
+    lo = p * np.power(np.clip(x / p, 0, None), a)
+    hi = 1 - (1 - p) * np.power(np.clip((1 - x) / (1 - p), 0, None), a)
+    return np.where(x < p, lo, hi)
+
+
+def _saturate(rgb, factor):
+    l = (rgb @ LUMA)[..., None]
+    return l + (rgb - l) * factor
+
+
+def correct(rgb, auto):
+    """Stage 1: levels, white balance, exposure (gamma) and, for flat profiles (D-Cinelike), a base contrast."""
+    rgb = (rgb - auto['black']) / max(.05, auto['white'] - auto['black'])
+    rgb = np.clip(rgb * np.array(auto['wb']), 0, 1)
+    rgb = np.power(rgb, auto['gamma'])
+    if auto['flat']:
+        rgb = _saturate(_curve(rgb, 1.18, .45), 1.22)
+    return np.clip(rgb, 0, 1)
+
+
+def look(rgb, L):
+    """Stage 2: creative look."""
+    w = L['warmth']
+    rgb = rgb * np.array([1 + .10 * w, 1 + .01 * w, 1 - .10 * w])
+    rgb = _curve(rgb, L['contrast'], L['pivot'])
+    h, s, v = _rgb_to_hsv(np.clip(rgb, 0, 1))
+    if L['bands']:
+        chroma = _smooth(.04, .22, s)
+        for centre, width, shift, satx, valx in L['bands']:
+            d = np.abs((h - centre + 180) % 360 - 180)
+            k = _smooth(0, 1, 1 - d / width) * chroma
+            h = h + shift * k; s = s * (1 + (satx - 1) * k); v = v * (1 + (valx - 1) * k)
+        rgb = _hsv_to_rgb(h, np.clip(s, 0, 1), np.clip(v, 0, 1))
+    l = (rgb @ LUMA)[..., None]
+    sh = np.array(L['shadows']); hi = np.array(L['highlights'])
+    sh = sh - sh @ LUMA; hi = hi - hi @ LUMA
+    rgb = rgb + (1 - l) ** 2 * sh + l ** 2 * hi
+    chroma = (rgb.max(-1) - rgb.min(-1))[..., None]
+    rgb = _saturate(rgb, L['sat'] * (1 + L['vibrance'] * np.clip(1 - chroma * 2.5, 0, 1)))
+    rgb = L['lift'] + (1 - L['lift']) * rgb
+    return np.clip(rgb, 0, 1)
+
+
+def apply(rgb, grade):
+    """rgb: float array [..., 3] in 0..1."""
+    g = normalized(grade)
+    if g is None: return rgb
+    base = correct(rgb, g['auto']) if g['correct'] else np.clip(rgb, 0, 1)
+    if g['look'] == 'none' or g['amount'] <= 0: return base
+    out = look(base, LOOKS[g['look']])
+    return np.clip(base + (out - base) * g['amount'], 0, 1)
+
+
+def key(grade):
+    return json.dumps(normalized(grade), sort_keys=True, separators=(',', ':'))
+
+
+@lru_cache(maxsize=32)
+def _table(grade_key):
+    i = np.linspace(0, 1, SIZE)
+    b, g, r = np.meshgrid(i, i, i, indexing='ij')        # red varies fastest (.cube and PIL order)
+    grid = np.stack([r, g, b], -1).reshape(-1, 3)
+    return np.ascontiguousarray(apply(grid, json.loads(grade_key)), dtype=np.float32)
+
+
+def table(grade):
+    return _table(key(grade))
+
+
+def active(e):
+    return isinstance(e, dict) and isinstance(e.get('grade'), dict)
+
+
+def pil(image, grade):
+    """Preview: same LUT through PIL (RGBA in, RGBA out, alpha kept)."""
+    from PIL import ImageFilter
+    lut = _pil_filter(key(grade))
+    alpha = image.getchannel('A'); rgb = image.convert('RGB').filter(lut)
+    out = rgb.convert('RGBA'); out.putalpha(alpha); return out
+
+
+@lru_cache(maxsize=16)
+def _pil_filter(grade_key):
+    from PIL import ImageFilter
+    return ImageFilter.Color3DLUT(SIZE, _table(grade_key).reshape(-1).tolist())
+
+
+def cube_dir():
+    base = Path(os.environ.get('LOCALAPPDATA', Path.home())) / 'EliteStudioWindows' / 'cache' / 'luts'
+    base.mkdir(parents=True, exist_ok=True); return base
+
+
+def cube(grade, folder=None):
+    """Writes (once) the .cube for this grade and returns its path."""
+    k = key(grade); path = Path(folder or cube_dir()) / f'grade-{hashlib.sha256(k.encode()).hexdigest()[:16]}.cube'
+    if not path.is_file():
+        rows = '\n'.join(f'{r:.6f} {g:.6f} {b:.6f}' for r, g, b in _table(k))
+        tmp = path.with_suffix('.tmp'); tmp.write_text(f'TITLE "Elite Studio grade"\nLUT_3D_SIZE {SIZE}\n{rows}\n', encoding='ascii'); os.replace(tmp, path)
+    return path
+
+
+def ffmpeg_filter(grade, folder=None):
+    p = str(cube(grade, folder)).replace('\\', '/').replace(':', r'\:')
+    return f"lut3d=file='{p}':interp=tetrahedral"
+
+
+# ---------- analysis ----------
+
+def srt_profile(path):
+    """DJI sidecar: [color_md : d_cinlike] marks the flat D-Cinelike profile."""
+    srt = Path(path).with_suffix('.SRT')
+    if not srt.is_file(): srt = Path(path).with_suffix('.srt')
+    try:
+        with open(srt, encoding='utf-8', errors='ignore') as f: head = f.read(4000)
+    except OSError: return None
+    m = re.search(r'color_md\s*:\s*([\w-]+)', head)
+    return m.group(1).lower() if m else None
+
+
+def stats(frames):
+    """frames: list of RGB float arrays (small). Returns the 'auto' block."""
+    px = np.concatenate([f.reshape(-1, 3) for f in frames])
+    l = px @ LUMA
+    black = float(np.percentile(l, .4)); white = float(np.percentile(l, 99.7))
+    black = min(black, .25); white = max(white, black + .70)          # never more than ~1.4x gain
+    n = np.clip((px - black) / (white - black), 0, 1); ln = n @ LUMA
+    mid = (ln > .15) & (ln < .85)
+    sel = n[mid] if mid.sum() > 100 else n
+    means = sel.mean(0); target = float(means @ LUMA)
+    wb = np.clip(target / np.maximum(means, 1e-4), .94, 1.06)
+    wb = 1 + (wb - 1) * .6                                    # gentle: keep the light's character
+    wb = wb / float(wb @ LUMA)
+    median = float(np.median(np.clip(n * wb, 0, 1) @ LUMA))
+    white = black + (white - black) / .97                     # a little headroom for skies and snow
+    sat = float(np.mean(px.max(1) - px.min(1)))
+    flat = bool(black > .035 and white < .93 and sat < .2)
+    return dict(black=round(black, 4), white=round(white, 4), gamma=round(exposure_gamma(median), 4), wb=[round(float(x), 4) for x in wb],
+                flat=flat, median=round(median, 4))
+
+
+def exposure_gamma(median, target=.38, strength=.6):
+    g = math.log(target) / math.log(min(.95, max(.05, median)))
+    return float(np.clip(1 + (g - 1) * strength, .8, 1.12))
+
+
+def match(autos):
+    """Shot matching: every clip aims at the same middle grey (the group's average), so cuts don't jump."""
+    medians = [a['median'] for a in autos if 'median' in a]
+    if len(medians) < 2: return autos
+    target = float(np.clip(np.mean(medians), .30, .45))
+    return [dict(a, gamma=round(exposure_gamma(a['median'], target, .85), 4)) if 'median' in a else a for a in autos]
+
+
+def analyze(path, samples=8, still=False):
+    import cv2
+    frames = []
+    if still:
+        from PIL import Image
+        with Image.open(path) as im: frames.append(np.asarray(im.convert('RGB').resize((320, 180)), dtype=np.float32) / 255)
+    else:
+        cap = cv2.VideoCapture(str(path))
+        try:
+            n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+            for i in range(samples):
+                if n > 1: cap.set(cv2.CAP_PROP_POS_FRAMES, int((i + .5) * n / samples))
+                ok, bgr = cap.read()
+                if not ok: continue
+                frames.append(cv2.cvtColor(cv2.resize(bgr, (320, 180), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2RGB).astype(np.float32) / 255)
+        finally: cap.release()
+    if not frames: raise ValueError(f'Impossibile leggere {Path(path).name}')
+    auto = stats(frames)
+    profile = srt_profile(path)
+    if profile: auto['flat'] = profile in ('d_cinlike', 'd-cinelike', 'dlog', 'd_log', 'dlog_m', 'hlg') or auto['flat']
+    return auto

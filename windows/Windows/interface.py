@@ -178,6 +178,9 @@ def build_ui(editor,Viewer,Bin,Timeline):
     action('Aggiungi traccia video/audio',e.add_track,None,sequence_menu)
     action('Recupera sessione interrotta',e.recover_session,None,file)
     action('Apri versione precedente come copia',e.restore_version,None,file)
+    color_menu=e.menuBar().addMenu('Colore')
+    from color_grading import open_window
+    action('Color grading automatico…',lambda:open_window(e),'Ctrl+G',color_menu)
     performance=e.menuBar().addMenu('Fluidità')
     action('Crea proxy delle clip selezionate',e.start_proxies,None,performance)
     action('Interrompi preparazione proxy',e.cancel_proxies,None,performance)

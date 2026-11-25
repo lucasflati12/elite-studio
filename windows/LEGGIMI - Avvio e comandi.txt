@@ -71,6 +71,7 @@ Ctrl+A          Seleziona tutte le clip
 Ctrl+C/V        Copia / incolla la selezione al cursore
 Ctrl+K          Taglia al cursore
 Ctrl+T          Aggiungi titolo
+Ctrl+G          Color grading automatico (menu Colore)
 Canc            Elimina; sulla traccia CC elimina la frase
 Shift+Canc      Elimina e chiudi lo spazio
 Q/W             Rifila fino al cursore / dal cursore chiudendo lo spazio
