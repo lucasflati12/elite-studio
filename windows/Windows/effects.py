@@ -6,7 +6,7 @@ from functools import lru_cache
 
 DEFAULTS=dict(exposure=0.,contrast=1.,saturation=1.,temperature=0.,fadeIn=0.,fadeOut=0.,audioFadeIn=0.,audioFadeOut=0.,rotation=0.,ease='smooth',keys=[])
 MOTION=dict(scale=1.,x=0.,y=0.,opacity=1.,rotation=0.,volume=1.)
-RANGES=dict(exposure=(-3,3),contrast=(.2,2),saturation=(0,2),temperature=(-1,1),fadeIn=(0,30),fadeOut=(0,30),audioFadeIn=(0,30),audioFadeOut=(0,30),rotation=(-360,360),scale=(.05,8),x=(-2,2),y=(-2,2),opacity=(0,1),volume=(0,2))
+RANGES=dict(exposure=(-3,3),contrast=(.2,2),saturation=(0,2),temperature=(-1,1),fadeIn=(0,30),fadeOut=(0,30),audioFadeIn=(0,30),audioFadeOut=(0,30),rotation=(-360,360),scale=(.05,8),x=(-2,2),y=(-2,2),opacity=(0,1),volume=(0,4))
 
 
 def validate(e):
@@ -125,10 +125,24 @@ def warp_motion(c):
 
 def audio_filters(c):
     e=c.get('effects',{}); out=[f"volume='{expression(c,'volume')}':eval=frame"]
+    if c.get('noiseReduction'): out.append('afftdn=nf=-25')
     for key,kind in [('audioFadeIn','in'),('audioFadeOut','out')]:
         duration=min(float(e.get(key,0)),c['duration'])
         if duration: out.append(f'afade=t={kind}:st={0 if kind=="in" else c["duration"]-duration}:d={duration}')
     return ','.join(out)
+
+
+def chroma(image, settings):
+    """Lightweight RGB key matching FFmpeg chromakey's spill-free alpha mask."""
+    if not settings: return image
+    import numpy as np
+    from PIL import Image
+    rgb=np.asarray(image.convert('RGB'),dtype=np.float32); key=np.array([int(settings.get('color','#00ff00')[i:i+2],16) for i in (1,3,5)],dtype=np.float32)
+    distance=np.sqrt(((rgb-key)**2).sum(axis=2))/441.673
+    tolerance=max(0,min(.5,float(settings.get('tolerance',.12)))); softness=max(.001,min(.5,float(settings.get('softness',.08))))
+    alpha=np.clip((distance-tolerance)/softness,0,1)*255
+    rgba=np.asarray(image.convert('RGBA')).copy(); rgba[:,:,3]=np.minimum(rgba[:,:,3],alpha.astype('uint8'))
+    return Image.fromarray(rgba,'RGBA')
 
 
 def crossfade(project,cid,duration=.35):

@@ -55,3 +55,5 @@ Give your AI assistant the format doc above plus the transcript of your clip and
 ## License
 
 Code: MIT (see `LICENSE`). Bundled Archivo fonts: SIL Open Font License 1.1.
+
+Round 3b Windows adds transitions, animated title styles, audio gain/noise reduction/ducking/detach, chroma key, frame snapshots and keyboard editing commands.

@@ -290,7 +290,20 @@ def title_image(title, size):
             sw=draw.textlength(subtitle,font=sf); draw.text(((w-sw)/2,y+round(90*w/1920)),subtitle,font=sf,fill=(230,234,239,230))
         return image
     from branding import card
-    return card(title,size)
+    image=card(title,size); preset=title.get('stylePreset','Normale')
+    if preset=='Sfondo box':
+        from PIL import ImageDraw
+        layer=Image.new('RGBA',size); d=ImageDraw.Draw(layer); pad=max(8,round(min(size)*.035)); d.rounded_rectangle((size[0]*.08,size[1]*.25,size[0]*.92,size[1]*.75),radius=pad,fill=(0,0,0,160)); layer.alpha_composite(image); return layer
+    if preset in ('Contorno','Ombra'):
+        from PIL import ImageFilter,ImageChops
+        alpha=image.getchannel('A'); expanded=alpha.filter(ImageFilter.MaxFilter(9))
+        layer=Image.new('RGBA',size,(0,0,0,0))
+        if preset=='Ombra':
+            shadow=Image.new('RGBA',size,(0,0,0,0)); shadow.putalpha(alpha.filter(ImageFilter.GaussianBlur(max(2,round(min(size)*.008))))); layer.alpha_composite(shadow,(0,0))
+        else:
+            outline=Image.new('RGBA',size,(0,0,0,220)); outline.putalpha(ImageChops.subtract(expanded,alpha)); layer.alpha_composite(outline)
+        layer.alpha_composite(image); return layer
+    return image
 
 
 def atempo(speed):
@@ -310,6 +323,32 @@ def export(project, output, progress=lambda value: None, cancel=None, hevc=False
         if not hardware or (cancel is not None and cancel.is_set()): raise
         # Some drivers initialize successfully but reject the actual sequence format.
         return _export(project,output,progress,cancel,hevc,False,quality,bitrate)
+
+
+def export_frame(project, time_seconds, output):
+    """Render one sequence frame through the regular export graph as full-resolution PNG."""
+    import cv2
+    from PIL import Image
+    at=max(0,float(time_seconds)); fps=float(project.settings.get('fps',30)); frame=1/fps
+    single=copy.deepcopy(project); selected=[]
+    for original in project.clips:
+        if original['start']<=at<original['start']+original['duration']:
+            clip=copy.deepcopy(original); elapsed=at-original['start']; clip['start']=-elapsed
+            if 'title' not in clip:clip['audioDisabled']=True
+            selected.append(clip)
+    single.data['clips']=selected
+    single.data['_renderDuration']=frame
+    if 'tracks' in single.data:
+        single.data['tracks']['audioMuted']=[True]*max(2,len(single.data['tracks'].get('audioMuted',[])))
+    for caption in single.data.get('captions',[]):
+        caption['start']-=at; caption['end']-=at
+        for word in caption.get('words',[]):word['s']-=at; word['e']-=at
+    with tempfile.TemporaryDirectory(prefix='elite-snapshot-') as temp:
+        movie=Path(temp)/'snapshot.mp4'; export(single,movie)
+        capture=cv2.VideoCapture(str(movie)); capture.set(cv2.CAP_PROP_POS_MSEC,0)
+        ok,bgr=capture.read(); capture.release()
+        if not ok: raise RuntimeError('Impossibile leggere il fotogramma esportato')
+        Image.fromarray(cv2.cvtColor(bgr,cv2.COLOR_BGR2RGB)).save(output)
 
 
 def _export(project, output, progress=lambda value: None, cancel=None, hevc=False, hardware=False, quality='balanced',bitrate=0):
@@ -332,7 +371,7 @@ def _export(project, output, progress=lambda value: None, cancel=None, hevc=Fals
     w,h=int(project.settings['width']),int(project.settings['height'])
     w+=w%2; h+=h%2
     fps=float(project.settings.get('fps',30))
-    duration=project.duration
+    duration=float(project.data.get('_renderDuration',project.duration))
     tracks=project.data['tracks']
     from export_options import encoder,codec_args
     encode_args=codec_args(encoder(hevc,hardware),quality,bitrate)
@@ -397,6 +436,11 @@ def _export(project, output, progress=lambda value: None, cancel=None, hevc=Fals
                     if l+r or t+b: chain+=f",crop=iw*{1-l-r:.8f}:ih*{1-t-b:.8f}:iw*{l:.8f}:ih*{t:.8f}"
                     if c.get('flipH'): chain+=',hflip'
                     if c.get('flipV'): chain+=',vflip'
+                    key=c.get('chromaKey')
+                    if key:
+                        color=str(key.get('color','#00ff00')).lstrip('#')
+                        rgb=tuple(int(color[i:i+2],16) for i in (0,2,4))
+                        chain+=f",chromakey=0x{color}:similarity={max(.01,min(.5,float(key.get('tolerance',.12))*2)):.4f}:blend={max(0,min(.5,float(key.get('softness',.08)))):.4f}"
                     bg=c.get('background',{})
                     if bg.get('type')=='blur' and not fill:
                         graph.append(chain+f",split[fg{index}][bg{index}]")
@@ -410,8 +454,16 @@ def _export(project, output, progress=lambda value: None, cancel=None, hevc=Fals
                     from effects import video_filters
                     filters=video_filters({**c,'_renderFPS':fps},w,h)
                     if filters: chain+=('' if chain.endswith(']') else ',')+filters
+                    transition=c.get('transition',{}); td=max(.001,float(transition.get('duration',0)))
+                    if transition:
+                        kind=transition.get('type','Dissolvenza al nero')
+                        if kind=='Sfocatura':chain+=f",boxblur=10:enable='lt(t,{td:.6f})'"
+                        if kind in ('Dissolvenza al nero','Wipe','Sfocatura','Dissolvenza','Zoom'):
+                            chain+=f",fade=t=in:st=0:d={td:.6f}:alpha=1"
                 else:
+                    anim=title.get('animationIn','Nessuna')
                     fade=max(0,min(float(title.get('fade',.4)),c['duration']/2))
+                    if anim in ('Dissolvenza','Macchina da scrivere','Pop/Scala'):fade=max(fade,min(.7,c['duration']/2))
                     if fade:
                         chain+=f',fade=t=in:st=0:d={fade}:alpha=1,fade=t=out:st={c["duration"]-fade}:d={fade}:alpha=1'
                 chain+=('' if chain.endswith(']') else ',')+f'setpts=PTS+{c["start"]}/TB[v{index}]'
@@ -420,16 +472,30 @@ def _export(project, output, progress=lambda value: None, cancel=None, hevc=Fals
                 local_time=f't-{c["start"]}'
                 x='0' if title is not None else f"({expression(c,'x',local_time)})*{w}"
                 y='0' if title is not None else f"({expression(c,'y',local_time)})*{h}"
+                if title is not None:
+                    anim=title.get('animationIn','Nessuna'); out_anim=title.get('animationOut','Nessuna'); local=f'(t-{c["start"]:.8f})'
+                    if anim=='Scorri su':y=f"if(lt({local},.35),.12*{h}*(1-{local}/.35),0)"
+                    if out_anim=='Scorri su':y=f"({y})-if(gt({local},{c['duration']-.35:.8f}),.12*{h}*(1-({c['duration']:.8f}-{local})/.35),0)"
+                    y=f'({y})'
+                transition=c.get('transition',{})
+                if transition and title is None:
+                    td=max(.001,float(transition.get('duration',0))); kind=transition.get('type','')
+                    if kind.startswith('Scorrimento'):
+                        x=f"({x})+if(lt({local_time},{td}),({1 if 'sinistra' in kind else -1 if 'destra' in kind else 0})*{w}*(1-{local_time}/{td}),0)"
+                        y=f"({y})+if(lt({local_time},{td}),({1 if 'su' in kind else -1 if 'giù' in kind else 0})*{h}*(1-{local_time}/{td}),0)"
+                    previous_input=f'v{index}'
+                else:previous_input=f'v{index}'
+                x=f'(W-w)/2+({x})'; y=f'(H-h)/2+({y})'
                 from effects import warp_motion
                 if title is None and warp_motion(c): x=y='0'
-                graph.append(f'[{previous}][v{index}]overlay=x=\'(W-w)/2+{x}\':y=\'(H-h)/2+{y}\':eof_action=pass:repeatlast=0:enable=\'between(t,{c["start"]},{c["start"]+c["duration"]})\'[o{index}]')
+                graph.append(f'[{previous}][{previous_input}]overlay=x=\'{x}\':y=\'{y}\':eof_action=pass:repeatlast=0:enable=\'between(t,{c["start"]},{c["start"]+c["duration"]})\'[o{index}]')
                 previous=f'o{index}'
-            if m and m.get('hasAudio') and not tracks.get('audioMuted',[False,False])[track]:
-                delay=round(c['start']*1000)
-                from effects import audio_filters
-                time_filter=atempo(speed) if c.get('pitch',True) else f'aresample=48000,asetrate=48000*{speed},aresample=48000'
-                graph.append(f'[{index}:a]asetpts=PTS-STARTPTS,{time_filter},atrim=duration={c["duration"]},{audio_filters(c)},aresample=48000,aformat=channel_layouts=stereo,adelay={delay}|{delay},apad,atrim=duration={duration}[a{index}]')
-                audio.append(f'[a{index}]')
+                if m and m.get('hasAudio') and not c.get('audioDisabled') and not tracks.get('audioMuted',[False,False])[track]:
+                    delay=round(c['start']*1000)
+                    from effects import audio_filters
+                    time_filter=atempo(speed) if c.get('pitch',True) else f'aresample=48000,asetrate=48000*{speed},aresample=48000'
+                    graph.append(f'[{index}:a]asetpts=PTS-STARTPTS,{time_filter},atrim=duration={c["duration"]},{audio_filters(c)},aresample=48000,aformat=channel_layouts=stereo,adelay={delay}|{delay},apad,atrim=duration={duration}[a{index}]')
+                    audio.append(f'[a{index}]')
             index+=1
         graph.append(''.join(audio)+f'amix=inputs={len(audio)}:duration=first:dropout_transition=0,volume={len(audio)},alimiter=limit=0.95[audio]')
         partial=Path(tmp)/'render.mp4'

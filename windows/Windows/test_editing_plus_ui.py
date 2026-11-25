@@ -5,7 +5,7 @@ import traceback
 from pathlib import Path
 from unittest.mock import patch
 
-from PySide6.QtCore import QTimer,Qt
+from PySide6.QtCore import QTimer,Qt,QPoint
 from PySide6.QtWidgets import QApplication,QMainWindow
 from PySide6.QtTest import QTest
 from core import Project,tool,CREATE_FLAGS
@@ -41,7 +41,17 @@ def execute(qapp):
                 e.undo(); assert abs(e.project.duration-1)<.01; e.redo(); assert abs(e.project.duration-3)<.01
                 e.undo(); e.select(c['id']); e.reverse_clip(); assert e.selected_clip()['reversed'] and e.selected_clip()['in']==0
                 e.undo(); assert not e.selected_clip().get('reversed')
-                print('PASS: marker shortcut, transform controls, freeze/reverse commands and undo/redo',flush=True)
+                e.undo(); c.update(start=0,duration=1); later=dict(c,id='later',start=2); e.project.clips.append(later); e.seek(.5)
+                e.select_right_of_playhead(); assert e.selection=={'later'}
+                e.nudge_selected(-1); assert abs(next(v for v in e.project.clips if v['id']=='later')['start']-(2-1/24))<.001
+                e.undo(); assert abs(next(v for v in e.project.clips if v['id']=='later')['start']-2)<.001
+                e.select('later'); e.close_gaps(); assert abs(next(v for v in e.project.clips if v['id']=='later')['start']-1)<.001
+                e.undo(); later=next(v for v in e.project.clips if v['id']=='later'); e.select('later')
+                rect=e.timeline.clip_rect(later); start=QPoint(int(rect.center().x()),int(rect.center().y()))
+                QTest.mousePress(e.timeline,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.AltModifier,start)
+                QTest.mouseMove(e.timeline,start+QPoint(36,0),50); QTest.mouseRelease(e.timeline,Qt.MouseButton.LeftButton,Qt.KeyboardModifier.AltModifier,start+QPoint(36,0))
+                assert len(e.project.clips)==3,'Alt-drag duplicate'; e.undo(); assert len(e.project.clips)==2
+                print('PASS: markers, transform/freeze/reverse, nudge, right selection, close gaps, Alt-drag duplicate, undo/redo',flush=True)
             finally:shutil.rmtree(folder,ignore_errors=True)
         except Exception:
             failures.append(traceback.format_exc()); print(failures[-1],flush=True)

@@ -209,7 +209,12 @@ def gui(initial=None):
                 self.editor.sequence_preview.invalidate()
                 if self.editor.razor: self.editor.cut(self.time_at(pos.x()),all_tracks=bool(event.modifiers()&Qt.KeyboardModifier.ShiftModifier)); return
                 r=self.clip_rect(c); edge=min(7,max(1,r.width()*.2)); mode='left' if pos.x()-r.left()<edge else ('right' if r.right()-pos.x()<edge else 'move')
-                self.drag=(c['id'],mode,pos.x(),copy.deepcopy(c),self.editor.snapshot())
+                if event.modifiers()&Qt.KeyboardModifier.AltModifier:
+                    before=self.editor.snapshot(); copies=copy.deepcopy(self.editor.selected_clips() or [c]); ids=set()
+                    for item in copies:item['id']=uid(); item['start']+=1/self.editor.project.settings['fps']; ids.add(item['id'])
+                    self.editor.project.clips.extend(copies); self.editor.selection=ids; self.editor.selected=copies[0]['id']; c=copies[0]
+                    self.editor.group_originals=copy.deepcopy(copies); self.drag=(c['id'],'move',pos.x(),copy.deepcopy(c),before)
+                else:self.drag=(c['id'],mode,pos.x(),copy.deepcopy(c),self.editor.snapshot())
                 self.group_originals=copy.deepcopy(self.editor.selected_clips())
             else:
                 if pos.y()<self.top:
@@ -906,12 +911,21 @@ def gui(initial=None):
                     if key not in self.title_cache: self.title_cache[key]=title_image(title,(w,h))
                     image=self.title_cache[key].copy(); elapsed=self.position-c['start']; remaining=c['duration']-elapsed; fade=float(title.get('fade',.4))
                     alpha=min(1,elapsed/fade,remaining/fade) if fade else 1
+                    animation=title.get('animationIn','Nessuna')
+                    if animation=='Dissolvenza':alpha=min(alpha,max(0,elapsed/.35))
+                    if animation=='Macchina da scrivere':alpha=min(alpha,max(0,elapsed/.7))
+                    if animation=='Scorri su':image=image.transform(image.size,Image.Transform.AFFINE,(1,0,0,0,1,round(h*.12*(1-min(1,elapsed/.35)))))
+                    if title.get('animationOut') in ('Dissolvenza','Scorri su','Pop/Scala') and remaining<.35:alpha*=max(0,remaining/.35)
                     if alpha<1: image.putalpha(image.getchannel('A').point(lambda x:int(x*max(0,alpha))))
-                    canvas.alpha_composite(image)
+                    oy=round((h-image.height)/2)
+                    if title.get('animationOut')=='Scorri su' and remaining<.35:oy-=round(h*.12*(1-remaining/.35))
+                    if title.get('animationOut')=='Pop/Scala' and remaining<.35:
+                        scale=.7+.3*max(0,remaining/.35); image=image.resize((max(1,round(image.width*scale)),max(1,round(image.height*scale))),Image.Resampling.BILINEAR); oy=(h-image.height)//2
+                    canvas.alpha_composite(image,((w-image.width)//2,oy))
                 elif m and m.get('hasVideo',True) and not tracks['videoHidden'][c['track']]:
                     image=self.frame(m,c.get('in',0)+(self.position-c['start'])*c.get('speed',1),c.get('pano',{}) if m.get('pano') or 'pano' in c else None,(w,h))
                     if image is None: warning=True; continue
-                    from effects import color,at,envelope
+                    from effects import color,at,envelope,chroma
                     motion=at(c,self.position-c['start'])
                     crop=c.get('crop',{}); l,r,t,b=(max(0,min(.45,float(crop.get(k,0)))) for k in ('left','right','top','bottom'))
                     if l+r or t+b:image=image.crop((round(image.width*l),round(image.height*t),max(1,round(image.width*(1-r))),max(1,round(image.height*(1-b)))))
@@ -919,7 +933,7 @@ def gui(initial=None):
                     if c.get('flipV'):image=image.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
                     iw,ih=image.size; factor=(max if c.get('fill') else min)(w/iw,h/ih)
                     iw,ih=max(1,round(iw*factor)),max(1,round(ih*factor)); image=image.resize((iw,ih),Image.Resampling.BILINEAR)
-                    image=color(image,c.get('effects',{}))
+                    image=chroma(color(image,c.get('effects',{})),c.get('chromaKey'))
                     if c.get('background',{}).get('type')=='blur' and not c.get('fill'):
                         from PIL import ImageFilter
                         bgfactor=max(w/iw,h/ih); bw,bh=max(w,round(iw*bgfactor)),max(h,round(ih*bgfactor)); bg=image.resize((bw,bh),Image.Resampling.BILINEAR)
@@ -932,6 +946,17 @@ def gui(initial=None):
                     image=surface.resize((sw,sh),Image.Resampling.BILINEAR)
                     if motion['rotation']: image=image.rotate(-motion['rotation'],resample=Image.Resampling.BILINEAR,expand=True); sw,sh=image.size
                     opacity=max(0,min(1,motion['opacity']*envelope(c,self.position-c['start'])))
+                    transition=c.get('transition',{}); td=max(.001,float(transition.get('duration',0)))
+                    if transition:
+                        progress=max(0,min(1,(self.position-c['start'])/td)); kind=transition.get('type','Dissolvenza al nero')
+                        if kind in ('Dissolvenza al nero','Wipe','Sfocatura','Zoom'):opacity*=progress
+                        if kind=='Sfocatura':
+                            from PIL import ImageFilter
+                            image=image.filter(ImageFilter.BoxBlur(max(1,round(10*min(w/w0,h/h0)))))
+                        if kind.startswith('Scorrimento'):
+                            delta=(1-progress)*w if 'sinistra' in kind else -(1-progress)*w if 'destra' in kind else 0
+                            dy=(1-progress)*h if 'su' in kind else -(1-progress)*h if 'giù' in kind else 0
+                            motion['x']+=delta/w; motion['y']+=dy/h
                     if opacity<1: image.putalpha(image.getchannel('A').point(lambda x:int(x*opacity)))
                     canvas.alpha_composite(image,(round((w-sw)/2+motion['x']*w),round((h-sh)/2+motion['y']*h)))
             if warning:
@@ -956,10 +981,16 @@ def gui(initial=None):
         def keyPressEvent(self,event):
             if isinstance(QApplication.focusWidget(),(QLineEdit,QTextEdit,QAbstractSpinBox)): super().keyPressEvent(event); return
             key=event.key(); shift=bool(event.modifiers()&Qt.KeyboardModifier.ShiftModifier)
+            alt=bool(event.modifiers()&Qt.KeyboardModifier.AltModifier)
             if key==Qt.Key.Key_M and shift: self.marker_step(-1 if event.modifiers()&Qt.KeyboardModifier.ControlModifier else 1)
             elif key==Qt.Key.Key_M: self.add_marker()
             elif key==Qt.Key.Key_R and event.modifiers()&Qt.KeyboardModifier.ControlModifier: self.speed_dialog()
             elif key==Qt.Key.Key_F and shift: self.freeze_frame()
+            elif key==Qt.Key.Key_A: self.select_right_of_playhead()
+            elif key==Qt.Key.Key_Comma: self.nudge_selected(-1)
+            elif key==Qt.Key.Key_Period: self.nudge_selected(1)
+            elif alt and key in (Qt.Key.Key_Left,Qt.Key.Key_Right): self.nudge_selected(-1 if key==Qt.Key.Key_Left else 1)
+            elif key==Qt.Key.Key_E and shift and event.modifiers()&Qt.KeyboardModifier.ControlModifier: self.snapshot_frame()
             elif key==Qt.Key.Key_Space: self.toggle()
             elif key==Qt.Key.Key_K: self.pause()
             elif key==Qt.Key.Key_L: self.shuttle(1)
@@ -1038,6 +1069,98 @@ def gui(initial=None):
                 from editing import change_speed
                 change_speed(self.project,c,value,ripple=ripple.isChecked()); c['pitch']=keep.isChecked(); c.pop('speedRamp',None)
             self.changed()
+        def apply_transition(self):
+            from PySide6.QtWidgets import QInputDialog
+            c=self.selected_clip()
+            if not c or 'title' in c:return
+            names=['Dissolvenza al nero','Scorrimento sinistra','Scorrimento destra','Scorrimento su','Scorrimento giù','Zoom','Wipe','Sfocatura']
+            name,ok=QInputDialog.getItem(self,'Transizioni','Transizione in entrata',names,0,False)
+            if not ok:return
+            sec,ok=QInputDialog.getDouble(self,'Transizioni','Durata (secondi)',.5,.05,min(5,c['duration']),2)
+            if not ok:return
+            self.checkpoint(); c['transition']={'type':name,'duration':sec}; self.changed()
+        def set_title_animation(self,which,name):
+            c=self.selected_clip()
+            if not c or 'title' not in c:return
+            self.checkpoint(); c['title'][which]=name; self.changed()
+        def edit_title_motion(self):
+            from PySide6.QtWidgets import QInputDialog
+            c=self.selected_clip()
+            if not c or 'title' not in c:return
+            names=['Nessuna','Dissolvenza','Scorri su','Pop/Scala','Macchina da scrivere']
+            incoming,ok=QInputDialog.getItem(self,'Animazione testo','Entrata',names,names.index(c['title'].get('animationIn','Nessuna')) if c['title'].get('animationIn','Nessuna') in names else 0,False)
+            if not ok:return
+            outgoing,ok=QInputDialog.getItem(self,'Animazione testo','Uscita',names[:4],0,False)
+            if not ok:return
+            styles=['Normale','Contorno','Ombra','Sfondo box']; style,ok=QInputDialog.getItem(self,'Stile testo','Preset',styles,0,False)
+            if ok:self.checkpoint(); c['title'].update(animationIn=incoming,animationOut=outgoing,stylePreset=style); self.changed()
+        def chroma_dialog(self):
+            from PySide6.QtWidgets import QColorDialog,QInputDialog
+            from PySide6.QtGui import QColor
+            c=self.selected_clip()
+            if not c:return
+            old=c.get('chromaKey',{}); color=QColorDialog.getColor(QColor(old.get('color','#00ff00')),self,'Colore da rimuovere')
+            if not color.isValid():return
+            tolerance,ok=QInputDialog.getDouble(self,'Chroma key','Tolleranza',float(old.get('tolerance',.12)),.01,.5,2)
+            if not ok:return
+            softness,ok=QInputDialog.getDouble(self,'Chroma key','Morbidezza',float(old.get('softness',.08)),.001,.5,3)
+            if ok:self.checkpoint(); c['chromaKey']={'color':color.name(),'tolerance':tolerance,'softness':softness}; self.changed()
+        def toggle_noise_reduction(self):
+            c=self.selected_clip()
+            if not c:return
+            self.checkpoint(); c['noiseReduction']=not c.get('noiseReduction',False); self.changed()
+        def detach_audio(self):
+            c=self.selected_clip(); m=self.project.item(c) if c else None
+            if not c or not m or not m.get('hasAudio'):return
+            self.checkpoint(); audio=copy.deepcopy(m); audio.update(id=uid(),name=m['name']+' · audio',hasVideo=False,hasAudio=True,still=False)
+            self.project.media.append(audio); clip=copy.deepcopy(c); clip.update(id=uid(),media=audio['id'],track=min(c['track'],len(self.project.data['tracks']['audioMuted'])-1),audioDetached=True); c['audioDisabled']=True
+            self.project.clips.append(clip); self.select(clip['id']); self.changed()
+        def duck_music(self):
+            selected=self.selected_clip(); target_track=selected['track'] if selected else 0
+            voice=[c for c in self.project.clips if c['track']!=target_track and self.project.item(c) and self.project.item(c).get('hasAudio') and not c.get('audioDisabled')]
+            music=[c for c in self.project.clips if c['track']==target_track and self.project.item(c) and self.project.item(c).get('hasAudio')]
+            if not voice or not music:return
+            self.checkpoint()
+            for c in music:
+                peaks=self.visuals.peaks.get(self.project.item(c)['id']); keys=[]
+                if peaks is None:continue
+                stride=max(20,int(c['duration']*100/800))
+                for i in range(0,min(len(peaks),int(c['duration']*100)),stride):
+                    local=i/100; t=c['start']+local; active=False
+                    for v in voice:
+                        if v['start']<=t<v['start']+v['duration']:
+                            vp=self.visuals.peaks.get(self.project.item(v)['id']); src=int((v.get('in',0)+(t-v['start'])*v.get('speed',1))*100)
+                            if vp is not None and 0<=src<len(vp) and vp[src]>.08:active=True; break
+                    keys.append(dict(t=c.get('in',0)+local*c.get('speed',1),volume=c.get('volume',1)*(.28 if active else 1)))
+                c.setdefault('effects',{})['keys']=keys
+            self.changed()
+        def select_right_of_playhead(self):
+            ids={c['id'] for c in self.project.clips if c['start']>=self.position-1e-6}
+            self.selection=ids; self.selected=next(iter(ids),None); self.selected_caption=None; self.update_inspector(); self.timeline.update()
+        def nudge_selected(self,direction):
+            clips=self.selected_clips()
+            if not clips:return
+            amount=direction/self.project.settings['fps']; self.checkpoint()
+            for c in clips:c['start']=max(0,c['start']+amount)
+            self.changed()
+        def close_gaps(self):
+            lane=self.selected_clip()['track'] if self.selected_clip() else 0
+            self.checkpoint(); cursor=0
+            for c in sorted((v for v in self.project.clips if v['track']==lane),key=lambda v:v['start']):
+                if c['start']>cursor:c['start']=cursor
+                cursor=max(cursor,c['start']+c['duration'])
+            self.changed()
+        def snapshot_frame(self):
+            from PySide6.QtWidgets import QFileDialog
+            path,_=QFileDialog.getSaveFileName(self,'Esporta fotogramma','fotogramma.png','PNG (*.png)')
+            if not path:return
+            if not path.lower().endswith('.png'):path+='.png'
+            # Render through the normal export graph, then sample the exact sequence frame.
+            from core import Project,export_frame
+            project=Project(); project.data=self.snapshot()
+            try:
+                export_frame(project,self.position,path)
+            except Exception as exc:self.error(str(exc))
         def freeze_frame(self):
             c=next((v for v in self.project.clips if v['start']<=self.position<v['start']+v['duration'] and self.project.item(v) and self.project.item(v).get('hasVideo')),None)
             if not c:return

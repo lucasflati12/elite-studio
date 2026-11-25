@@ -11,3 +11,5 @@ Round 3a Windows aggiunge marker, velocità/durata con curve materializzate, fer
 Su un altro PC usa `Installa Elite Studio.bat`, dopo avere installato Python 3.10+ e FFmpeg/ffprobe. `Ripara Elite Studio.bat` aggiorna dipendenze e collegamento. `Diagnostica Elite Studio.bat` mostra lo stato del runtime.
 
 Questa cartella contiene esclusivamente Windows. La versione Mac si trova separatamente in `Downloads/Elite Studio Mac`; per trasferirla usa `Elite Studio Mac.zip`.
+
+Round 3b aggiunge transizioni, animazioni e stili dei titoli, guadagno audio in dB, riduzione rumore in export, ducking e separazione audio, chroma key, snapshot PNG e comandi da tastiera. I nuovi campi JSON sono descritti nel formato condiviso.

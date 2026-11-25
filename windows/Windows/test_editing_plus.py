@@ -21,8 +21,7 @@ class EditingPlusTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls): cls.temp.cleanup()
     def project(self):
-        p=Project(); p.settings.update(width=320,height=180,fps=24)
-        m=p.add_media(self.source); c=p.add_clip(m['id']); c['duration']=1.5
+        p=Project(); m=p.add_media(self.source); p.settings.update(width=320,height=180,fps=24); c=p.add_clip(m['id']); c['duration']=1.5
         return p,c
     def pixels(self,path,t=.2):
         cap=cv2.VideoCapture(str(path)); cap.set(cv2.CAP_PROP_POS_MSEC,t*1000); ok,frame=cap.read(); cap.release(); self.assertTrue(ok); return frame
@@ -59,6 +58,41 @@ class EditingPlusTests(unittest.TestCase):
         target=self.root/'transform.elitestudio'; p.save(target); loaded=Project.load(target)
         self.assertEqual(loaded.clips[0]['crop'],c['crop']); self.assertTrue(loaded.clips[0]['flipH']); self.assertEqual(loaded.clips[0]['background'],c['background'])
         p.data=before; self.assertNotIn('crop',p.clips[0])
+    def test_7_transitions_export_and_json_undo(self):
+        p,c=self.project(); before=copy.deepcopy(p.data); c['transition']={'type':'Dissolvenza al nero','duration':.3}
+        out=self.root/'transition.mp4'; export(p,out); self.assertAlmostEqual(probe(out)['duration'],p.duration,delta=.15)
+        c['transition']={'type':'Zoom','duration':.3}; export(p,self.root/'transition-zoom.mp4')
+        saved=self.root/'transition.elitestudio'; p.save(saved); self.assertEqual(Project.load(saved).clips[0]['transition']['duration'],.3)
+        p.data=before; self.assertNotIn('transition',p.clips[0])
+    def test_8_title_animation_styles_export_and_roundtrip(self):
+        p,c=self.project(); title=dict(id=uid(),track=2,start=.1,duration=.8,**{'in':0,'speed':1},title={'style':'text','names':'TEST','animationIn':'Pop/Scala','animationOut':'Dissolvenza','stylePreset':'Contorno'})
+        p.clips.append(title); out=self.root/'text.mp4'; export(p,out); self.assertGreater(float(np.std(self.pixels(out,.3))),10)
+        saved=self.root/'text.elitestudio'; p.save(saved); self.assertEqual(Project.load(saved).clips[-1]['title']['stylePreset'],'Contorno')
+    def test_9_gain_noise_reduction_ducking_and_detached_audio_export(self):
+        p,c=self.project(); before=copy.deepcopy(p.data); c.update(volume=0,noiseReduction=True,audioDisabled=True)
+        audio=copy.deepcopy(c); audio.update(id=uid(),track=1,audioDetached=True); audio.pop('audioDisabled'); p.clips.append(audio)
+        audio['effects']={'keys':[{'t':0,'volume':.25},{'t':.5,'volume':.25}]}
+        out=self.root/'audio-plus.mp4'; export(p,out); self.assertAlmostEqual(probe(out)['duration'],p.duration,delta=.15)
+        saved=self.root/'audio-plus.elitestudio'; p.save(saved); loaded=Project.load(saved)
+        self.assertTrue(loaded.clips[0]['noiseReduction']); self.assertTrue(loaded.clips[1]['audioDetached']); self.assertEqual(loaded.clips[1]['effects']['keys'][0]['volume'],.25)
+        p.data=before; self.assertNotIn('noiseReduction',p.clips[0])
+    def test_10_chroma_key_export_uses_key_field(self):
+        from PIL import Image
+        green=self.root/'green.png'; Image.new('RGB',(320,180),(0,255,0)).save(green)
+        p=Project(); p.settings.update(width=320,height=180,fps=24); m=probe(green); p.media.append(m); c=p.add_clip(m['id']); c.update(duration=.5,chromaKey={'color':'#00ff00','tolerance':.12,'softness':.08})
+        out=self.root/'chroma.mp4'; export(p,out); frame=self.pixels(out,.1)
+        self.assertLess(float(np.mean(frame)),20)
+        saved=self.root/'chroma.elitestudio'; p.save(saved); self.assertEqual(Project.load(saved).clips[0]['chromaKey']['color'],'#00ff00')
+    def test_11_snapshot_export_frame_and_12_keyboard_edit_results(self):
+        p,c=self.project(); before=copy.deepcopy(p.data); c.update(start=.25,volume=.75)
+        out=self.root/'shortcut.mp4'; export(p,out); image=self.pixels(out,.3); self.assertGreater(float(np.std(image)),20)
+        self.assertTrue(np.array_equal(image,self.pixels(out,.3)))
+        from core import export_frame
+        from PIL import Image
+        still=self.root/'snapshot.png'; export_frame(p,.3,still)
+        with Image.open(still) as snapshot:self.assertEqual(snapshot.size,(320,180))
+        saved=self.root/'shortcut.elitestudio'; p.save(saved); loaded=Project.load(saved); self.assertEqual(loaded.clips[0]['start'],.25)
+        p.data=before; self.assertEqual(p.clips[0]['start'],0)
 
 
 if __name__=='__main__': unittest.main()

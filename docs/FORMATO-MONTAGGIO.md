@@ -26,3 +26,22 @@ Ogni elemento ha `t` (number, predefinito `0`, tempo sequenza non negativo), `na
 Windows applica crop/specchio/sfondo nella preview Pillow e nell'export FFmpeg. Lo sfondo usa box blur e centratura; la preview riduce il raggio in proporzione alla risoluzione della preview. Un port può usare un blur gaussiano nativo, mantenendo la stessa sorgente, ritaglio, ingrandimento, centratura e quantità relativa. I campi neutral (ritaglio zero, flip falso, nessun background, speed 1) devono restare sul percorso originale.
 
 Il comando Speed/Duration può materializzare una curva in clip contigue. Un port deve rispettare `start`, `duration`, `in` e `speed` di ciascun segmento; questi campi sono la definizione di playback, mentre `speedRamp` è solo descrittivo.
+
+
+## Campi aggiunti Round 3b (Windows; port Mac)
+
+Tutti i campi seguenti sono opzionali. Se assenti, valgono i default indicati e il rendering storico resta invariato.
+
+| Campo JSON | Posizione, tipo e default | Rendering |
+|---|---|---|
+| `transition` | Clip entrante; oggetto opzionale `{ "type": "Dissolvenza al nero", "duration": 0.5 }`. `type` stringa: `Dissolvenza al nero`, `Scorrimento sinistra`, `Scorrimento destra`, `Scorrimento su`, `Scorrimento giù`, `Zoom`, `Wipe`, `Sfocatura`; durata number in secondi, default `0.5`, minimo `0.05`. | Si applica all'inizio della clip selezionata e dura `duration`. Preview ed export implementano dissolve/slide/blur; `Zoom` e `Wipe` usano una dissolvenza alpha semplificata in Windows. La preview puo approssimare gli effetti FFmpeg. Nessun effetto se il campo manca. |
+| `title.animationIn` | Oggetto `title`; stringa opzionale, default `Nessuna`. Valori `Nessuna`, `Dissolvenza`, `Scorri su`, `Pop/Scala`, `Macchina da scrivere`. | L'entrata dura al massimo 0.7 s. Scorri su e animato nella preview e nell'export; Pop/Scala usa una dissolvenza semplificata in entrambi. `Macchina da scrivere` e reso come entrata graduale, senza rivelazione lettera per lettera. |
+| `title.animationOut` | Oggetto `title`; stringa opzionale, default `Nessuna`; valori `Nessuna`, `Dissolvenza`, `Scorri su`, `Pop/Scala`. | L'uscita e associata alla fine della clip titolo; Windows applica dissolvenza alpha per l'export. |
+| `title.stylePreset` | Oggetto `title`; stringa opzionale, default `Normale`; valori `Normale`, `Contorno`, `Ombra`, `Sfondo box`. | Stile applicato alla bitmap titolo prima del compositing. Preview ed export Windows usano lo stesso PNG generato. |
+| `volume` | Clip; number lineare, default `1`, ammesso `0` (meno infinito dB) fino a `4` (+12.04 dB). | `10^(dB/20)` e il guadagno mostrato dall'ispettore. Export usa il filtro volume FFmpeg; il campo e compatibile con i keyframe `effects.keys[].volume`. |
+| `noiseReduction` | Clip audio; boolean, default `false`. | Se `true`, Windows export inserisce FFmpeg `afftdn` prima del mix. Windows preview non applica la riduzione. Il port Mac puo ignorare il campo, poiche AVAudioMix non offre qui un equivalente leggero; l'UI Mac deve segnalarlo come solo export Windows. |
+| `chromaKey` | Clip video; oggetto opzionale `{ "color": "#00ff00", "tolerance": 0.12, "softness": 0.08 }`. `color` stringa esadecimale CSS, default verde; tolleranza e morbidezza number normalizzati in `[0.001, 0.5]` (tolleranza default `0.12`, morbidezza default `0.08`). | Rimuove il colore selezionato con alpha progressiva. Windows preview usa distanza RGB Pillow/numpy; export usa FFmpeg `chromakey`. Applica il key prima del fit e del compositing. |
+| `audioDisabled` | Clip; boolean, default `false`. | Disattiva l'audio incorporato di quella clip, utile dopo averlo separato. Non cambia la traccia video. |
+| `audioDetached` | Clip audio separata; boolean, default `false`. | Metadato descrittivo. La clip usa un media entry `hasVideo: false` e la normale traccia audio; il renderer la riproduce come audio autonomo. |
+
+La riduzione musica sotto la voce Windows crea normali keyframe `effects.keys[].volume` sulla clip musica (valori media-time e guadagno lineare). Non introduce un campo proprietario e quindi la curva viene riutilizzata dai renderer che gia supportano i keyframe volume.

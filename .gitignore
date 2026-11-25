@@ -16,3 +16,4 @@ __pycache__/
 *.pyc
 windows/Windows/.test-appdata*/
 .test-appdata-r3a*/
+.test-appdata-r3b*/

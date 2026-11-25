@@ -108,3 +108,15 @@ del modello vocale. Dettagli tecnici e verifiche sono nei file README.md,
 Windows/README.md e VERIFICHE.md.
 
 Round 2 colore: introdotti curve monotone, curve hue e import LUT .cube nella pipeline LUT condivisa; la finestra include strumenti ruota/curva, bypass anteprima, scopes e azioni preset/applica/copia. Per i dettagli e le limitazioni consultare CODEX_REPORT.md.
+
+ROUND 3B - TRANSIZIONI, AUDIO E TESTO
+
+Sequenza > Transizioni applica dissolve, scorrimento, zoom o sfocatura
+all'inizio della clip selezionata. Animazioni e stile testo regola i titoli.
+L'ispettore audio mostra il guadagno in dB (da meno infinito a +12). Sequenza offre
+riduzione rumore solo in export Windows, ducking musica e Separa audio.
+Chroma key apre selezione colore, tolleranza e morbidezza.
+
+Ctrl+Shift+E esporta il fotogramma corrente come PNG. A seleziona le clip
+a destra del cursore; , e . spostano la selezione di un fotogramma;
+Alt+trascinamento duplica le clip; Chiudi spazi riordina la traccia.
