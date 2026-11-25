@@ -160,6 +160,9 @@ struct EliteStudioApp: App {
             }
             CommandMenu("Colore") {
                 Button("Colore…") { GradingWindow.show(editor) }.keyboardShortcut("g")
+                Divider()
+                Button("Copia grading") { GradingWindow.copyGrade() }.keyboardShortcut("c", modifiers: [.command, .shift])
+                Button("Incolla grading") { GradingWindow.pasteGrade() }.keyboardShortcut("v", modifiers: [.command, .shift])
             }
             CommandMenu("Sequenza") {
                 Button("Taglia al playhead") { editor.addEdit() }.keyboardShortcut("k")
