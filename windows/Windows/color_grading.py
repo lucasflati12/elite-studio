@@ -12,8 +12,7 @@ from PIL import ImageDraw
 from PySide6.QtCore import Qt, QObject, QSize, Signal, QRectF, QPointF
 from PySide6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPen, QPixmap, QPainterPath
 from PySide6.QtWidgets import (QCheckBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
-                               QPushButton, QSlider, QVBoxLayout, QWidget, QComboBox, QInputDialog, QTabWidget, QScrollArea)
-from PySide6.QtGui import QShortcut, QKeySequence
+                               QPushButton, QSlider, QVBoxLayout, QWidget, QComboBox, QInputDialog, QTabWidget, QScrollArea, QGridLayout)
 
 import grading
 
@@ -66,7 +65,7 @@ class Compare(QWidget):
 class Wheel(QWidget):
     """Compact chroma puck; drag maps to a luma-neutral RGB balance."""
     began=Signal(); moved=Signal(float,float); reset=Signal()
-    def __init__(self): super().__init__(); self.setFixedSize(104,104); self.xy=(0.,0.); self.drag=False
+    def __init__(self): super().__init__(); self.setFixedSize(76,76); self.xy=(0.,0.); self.drag=False
     def mousePressEvent(self,e):
         if e.button()==Qt.MouseButton.LeftButton:
             self.drag=True; self.began.emit(); self.mouseMoveEvent(e)
@@ -80,10 +79,11 @@ class Wheel(QWidget):
 
 
 class CurveEditor(QWidget):
-    changed=Signal(object)
-    def __init__(self): super().__init__(); self.setMinimumSize(220,150); self.points=[]; self.selected=-1
+    changed=Signal(object); began=Signal()
+    def __init__(self, hue=False): super().__init__(); self.setMinimumSize(220,150); self.points=[]; self.selected=-1; self.hue=hue
     def pos(self,e): return ((e.position().x()-8)/(self.width()-16),1-(e.position().y()-8)/(self.height()-16))
     def mousePressEvent(self,e):
+        self.began.emit()
         x,y=self.pos(e); self.selected=min(range(len(self.points)),key=lambda i:(self.points[i][0]-x)**2+(self.points[i][1]-y)**2) if self.points else -1
         if self.selected<0 or sum((self.points[self.selected][0]-x)**2+(self.points[self.selected][1]-y)**2 for _ in [0])>.0025:
             self.points.append([x,y]); self.selected=len(self.points)-1; self.points.sort(); self.changed.emit(self.points)
@@ -91,12 +91,24 @@ class CurveEditor(QWidget):
     def mouseMoveEvent(self,e):
         if self.selected>=0:
             x,y=self.pos(e); self.points[self.selected]=[min(.99,max(.01,x)),min(1,max(0,y))]; self.points.sort(); self.selected=min(range(len(self.points)),key=lambda i:abs(self.points[i][0]-x)); self.changed.emit(self.points); self.update()
+    def mouseReleaseEvent(self,e): self.selected=-1
     def mouseDoubleClickEvent(self,e):
         if self.points:
             x,y=self.pos(e); i=min(range(len(self.points)),key=lambda j:(self.points[j][0]-x)**2+(self.points[j][1]-y)**2); self.points.pop(i); self.selected=-1; self.changed.emit(self.points); self.update()
     def paintEvent(self,e):
-        p=QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing); r=QRectF(8,8,self.width()-16,self.height()-16); p.fillRect(r,QColor('#101923')); p.setPen(QPen(QColor('#425363'),1)); p.drawRect(r); p.setPen(QPen(QColor('#e4ca4a'),2)); pts=[[0,0],*sorted(self.points),[1,1]]; path=QPainterPath(); path.moveTo(r.left(),r.bottom());
-        for x,y in pts[1:]: path.lineTo(r.left()+x*r.width(),r.bottom()-y*r.height())
+        p=QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing); r=QRectF(8,8,self.width()-16,self.height()-16); p.fillRect(r,QColor('#101923'))
+        if self.hue:
+            for x in range(int(r.width())): p.fillRect(QRectF(r.left()+x,r.top(),2,r.height()),QColor.fromHsv(int(x/max(1,r.width())*359),180,120))
+            p.fillRect(r,QColor(5,11,18,180))
+        p.setPen(QPen(QColor('#425363'),1)); p.drawRect(r); p.setPen(QPen(QColor('#e4ca4a'),2)); pts=sorted(self.points); path=QPainterPath()
+        if pts:
+            path.moveTo(r.left()+pts[0][0]*r.width(),r.bottom()-pts[0][1]*r.height())
+            xs=[0.,* [q[0] for q in pts],1.]; ys=[0.,* [q[1] for q in pts],1.]
+            display_pts=grading.normalized({'curves':{'master':pts}})['curves']['master'] if not self.hue else pts
+            for i in range(256):
+                x=i/255; y=float(grading._mono_curve(__import__('numpy').array(x),display_pts)) if not self.hue else __import__('numpy').interp(x,xs,ys)
+                path.lineTo(r.left()+x*r.width(),r.bottom()-y*r.height())
+        else: path.moveTo(r.left(),r.bottom()); path.lineTo(r.right(),r.top())
         p.drawPath(path); p.setBrush(QColor('#e4ca4a'))
         for x,y in self.points:p.drawEllipse(QPointF(r.left()+x*r.width(),r.bottom()-y*r.height()),4,4)
 
@@ -142,34 +154,56 @@ class GradingWindow(QDialog):
         self.match = QCheckBox('Uniforma le clip tra loro'); self.match.setChecked(self.state['match'])
         self.correct.toggled.connect(lambda v: self.set_state(correct=v)); self.match.toggled.connect(lambda v: self.set_state(match=v))
         right.addWidget(self.correct); right.addWidget(self.match)
-        self.basic_sliders = {}
+        self.basic_sliders = {}; self.basic_labels=[]
         for key, label, lo, hi, initial in [('temperature','Temperatura',-100,100,0),('tint','Tinta',-100,100,0),('exposure','Esposizione',-500,500,0),('contrast','Contrasto',0,200,100),('highlights','Luci',-100,100,0),('shadows','Ombre',-100,100,0),('whites','Bianchi',-100,100,0),('blacks','Neri',-100,100,0),('saturation','Saturazione',0,200,100),('vibrance','Vividezza',-100,100,0)]:
-            right.addWidget(QLabel(label)); slider=QSlider(Qt.Orientation.Horizontal); slider.setRange(lo,hi)
+            lab=QLabel(label); right.addWidget(lab); self.basic_labels.append(lab); slider=QSlider(Qt.Orientation.Horizontal); slider.setRange(lo,hi)
             value=self.state['basic'].get(key,initial/100 if key not in ('contrast','saturation') else initial/100)
-            slider.setValue(round(value*100)); slider.sliderReleased.connect(lambda k=key,s=slider:self.edit_basic(k,s.value()/100))
+            slider.setValue(round(value*100)); slider.sliderPressed.connect(self.e.checkpoint); slider.valueChanged.connect(lambda v,k=key:self.edit_basic(k,v/100,live=True))
             right.addWidget(slider); self.basic_sliders[key]=slider
         self.wheel_name=QComboBox(); self.wheel_name.addItems(['lift','gamma','gain','offset']); right.addWidget(self.wheel_name)
         self.wheel=Wheel(); right.addWidget(self.wheel,0,Qt.AlignmentFlag.AlignHCenter)
         self.wheel.began.connect(self.e.checkpoint); self.wheel.moved.connect(self.wheel_changed); self.wheel.reset.connect(self.wheel_reset)
         self.curve_channel=QComboBox(); self.curve_channel.addItems(['master','r','g','b']); right.addWidget(self.curve_channel)
-        self.curve=CurveEditor(); right.addWidget(self.curve); self.curve.changed.connect(self.curve_changed)
+        self.curve=CurveEditor(); right.addWidget(self.curve); self.curve.changed.connect(self.curve_changed); self.curve.began.connect(self.e.checkpoint)
         self.amount_label = QLabel(); right.addWidget(self.amount_label)
         self.amount = QSlider(Qt.Orientation.Horizontal); self.amount.setRange(0, 150); self.amount.setValue(round(self.state['amount'] * 100))
-        self.amount.valueChanged.connect(self.amount_moving); self.amount.sliderReleased.connect(lambda: self.set_state(amount=self.amount.value() / 100))
+        self.amount.sliderPressed.connect(self.e.checkpoint); self.amount.valueChanged.connect(self.amount_moving); self.amount.sliderReleased.connect(lambda: self.set_state(amount=self.amount.value() / 100))
         right.addWidget(self.amount)
         for text, fn in (('Applica di nuovo / rianalizza', self.reanalyse), ('Esporta LUT .cube (DaVinci)…', self.export_cube),
                          ('Rimuovi grading', self.remove), ('Chiudi', self.close)):
             b = QPushButton(text); b.clicked.connect(fn); right.addWidget(b)
         self.bypass=QCheckBox('Confronto senza grading'); self.bypass.toggled.connect(lambda _:self.refresh_preview()); right.addWidget(self.bypass)
-        self.tabs=QTabWidget();
-        # Keep the complete control column reachable on laptop screens.
-        scroll=QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(panel); self.tabs.addTab(scroll,'Automatico / Primarie / Curve');
-        root.removeWidget(panel); root.addWidget(self.tabs,1)
-        for text,fn in (('Salva preset',self.save_preset),('Carica preset',self.load_preset),('Elimina preset',self.delete_preset),('Applica a tutte le clip',self.apply_all),('Applica alla traccia',self.apply_track)):
-            b=QPushButton(text); right.addWidget(b); b.clicked.connect(fn)
-        self.short_copy=QShortcut(QKeySequence('Ctrl+Shift+C'),self); self.short_copy.activated.connect(self.copy_grade)
-        self.short_paste=QShortcut(QKeySequence('Ctrl+Shift+V'),self); self.short_paste.activated.connect(self.paste_grade)
+        self.tabs=QTabWidget(); pages={}
+        for name in ('Automatico','Primarie','Curve','Curve HSL','LUT'):
+            page=QWidget(); lay=QVBoxLayout(page); lay.setContentsMargins(6,6,6,6); lay.setSpacing(3); scroll=QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(page); self.tabs.addTab(scroll,name); pages[name]=lay
+        def move(widget, page):
+            right.removeWidget(widget); widget.setParent(None); pages[page].addWidget(widget)
+        for widget in [title,self.clips,self.correct,self.match,*sum(([lab,sl] for lab,sl in zip(self.basic_labels,self.basic_sliders.values())),[]),self.amount_label,self.amount,self.bypass]: move(widget,'Automatico')
+        move(self.wheel_name,'Primarie'); move(self.wheel,'Primarie'); move(self.curve_channel,'Curve'); move(self.curve,'Curve')
+        self.wheels={}
+        for i,key in enumerate(('lift','gamma','gain','offset')):
+            if i==0: wheel=self.wheel
+            else:
+                wheel=Wheel(); wheel.began.connect(self.e.checkpoint); wheel.moved.connect(lambda x,y,k=key:self.wheel_changed(x,y,k)); wheel.reset.connect(lambda k=key:self.wheel_reset(k))
+            master=QSlider(Qt.Orientation.Horizontal); master.setRange(-100,100); master.setValue(0); master.sliderPressed.connect(lambda k=key:self.begin_wheel_master(k)); master.valueChanged.connect(lambda v,k=key:self.wheel_master(k,v/100)); self.wheels[key]=(wheel,master)
+            box=QWidget(); bl=QVBoxLayout(box); bl.setContentsMargins(2,2,2,2); bl.addWidget(QLabel(key.title()),0,Qt.AlignmentFlag.AlignHCenter); bl.addWidget(wheel,0,Qt.AlignmentFlag.AlignHCenter); bl.addWidget(QLabel('Master'),0,Qt.AlignmentFlag.AlignHCenter); bl.addWidget(master); pages['Primarie'].addWidget(box)
+        self.hue_channel=QComboBox(); self.hue_channel.addItems(['Hue vs Sat','Hue vs Hue','Hue vs Lum','Lum vs Sat']); pages['Curve HSL'].addWidget(self.hue_channel)
+        self.hue_curve=CurveEditor(True); self.hue_curve.changed.connect(self.hue_changed); pages['Curve HSL'].addWidget(self.hue_curve,1)
+        self.lut_controls={}
+        for key,label in (('inputLut','Input LUT'),('creativeLut','Creative LUT')):
+            pages['LUT'].addWidget(QLabel(label)); row=QHBoxLayout(); path=QLabel('Nessun file'); path.setWordWrap(True); pick=QPushButton('Scegli…'); clear=QPushButton('Cancella'); row.addWidget(path,1); row.addWidget(pick); row.addWidget(clear); pages['LUT'].addLayout(row)
+            amount=QSlider(Qt.Orientation.Horizontal); amount.setRange(0,100); pages['LUT'].addWidget(amount); warning=QLabel('File LUT mancante'); warning.setStyleSheet('color:#f55'); warning.hide(); pages['LUT'].addWidget(warning)
+            self.lut_controls[key]=(path,amount,warning); pick.clicked.connect(lambda _,k=key:self.pick_lut(k)); clear.clicked.connect(lambda _,k=key:self.set_lut(k,{'path':'','amount':0})); amount.sliderPressed.connect(self.e.checkpoint); amount.valueChanged.connect(lambda v,k=key:self.lut_amount(k,v))
+        self.reset_buttons={}
+        for name,layout in pages.items():
+            reset=QPushButton('Reimposta'); layout.addWidget(reset); reset.clicked.connect(lambda _,n=name:self.reset_section(n)); self.reset_buttons[name]=reset
+        for text,fn in (('Applica di nuovo / rianalizza',self.reanalyse),('Esporta LUT .cube (DaVinci)…',self.export_cube),('Rimuovi grading',self.remove),('Salva preset',self.save_preset),('Carica preset',self.load_preset),('Elimina preset',self.delete_preset),('Applica a tutte le clip',self.apply_all),('Applica alla traccia',self.apply_track),('Chiudi',self.close)):
+            b=QPushButton(text); pages['Automatico'].addWidget(b); b.clicked.connect(fn)
+        root.removeWidget(panel); root.addWidget(self.tabs,2)
+        self.curve_channel.currentIndexChanged.connect(lambda _:self.load_curve_points())
+        self.hue_channel.currentIndexChanged.connect(lambda _:self.load_hue_points())
         self.amount_moving(self.amount.value())
+        self.load_curve_points(); self.load_hue_points(); self.update_lut_ui()
         self.fill_clips(); self.select_look(self.state['look'])
         self.start_analysis(apply_after=True)
 
@@ -238,16 +272,70 @@ class GradingWindow(QDialog):
         auto = autos.get(self.media(c)['path'], grading.NEUTRAL_AUTO)
         return dict(look=s['look'], amount=round(s['amount'], 3), correct=s['correct'], match=s['match'], auto=copy.deepcopy(auto), basic=copy.deepcopy(s['basic']), wheels=copy.deepcopy(s['wheels']), curves=copy.deepcopy(s.get('curves',{})), hue=copy.deepcopy(s.get('hue',{})), inputLut=copy.deepcopy(s.get('inputLut',{})), creativeLut=copy.deepcopy(s.get('creativeLut',{})))
 
-    def edit_basic(self, key, value):
+    def edit_basic(self, key, value, live=False):
         basic=copy.deepcopy(self.state['basic']); basic[key]=value
-        self.set_state(basic=basic)
+        self.state['basic']=basic
+        if live: self.apply(checkpoint=False)
+        else:self.set_state(basic=basic)
 
-    def wheel_changed(self,x,y):
-        k=self.wheel_name.currentText(); wheels=copy.deepcopy(self.state['wheels']); wheels[k]=[round(.25*x,4),round(.25*y,4),round(-.25*(.2126*x+.7152*y)/.0722,4)]; self.state['wheels']=wheels; self.apply(checkpoint=False)
-    def wheel_reset(self):
-        wheels=copy.deepcopy(self.state['wheels']); wheels[self.wheel_name.currentText()]=[0,0,0]; self.state['wheels']=wheels; self.apply(checkpoint=False)
+    def wheel_changed(self,x,y,key=None):
+        k=key or self.wheel_name.currentText(); wheels=copy.deepcopy(self.state['wheels']); wheels[k]=[round(.25*x,4),round(.25*y,4),round(-.25*(.2126*x+.7152*y)/.0722,4)]; self.state['wheels']=wheels; self.apply(checkpoint=False)
+    def wheel_master(self,key,value):
+        wheels=copy.deepcopy(self.state['wheels']); rgb=getattr(self,'_wheel_master_start',{}).get(key,wheels.get(key,[0,0,0])); wheels[key]=[max(-.25,min(.25,c+value*.25)) for c in rgb]; self.state['wheels']=wheels; self.apply(checkpoint=False)
+    def begin_wheel_master(self,key):
+        self.e.checkpoint(); start=getattr(self,'_wheel_master_start',{}); start[key]=copy.deepcopy(self.state['wheels'].get(key,[0,0,0])); self._wheel_master_start=start
+    def wheel_reset(self,key=None):
+        k=key or self.wheel_name.currentText()
+        wheels=copy.deepcopy(self.state['wheels']); wheels[k]=[0,0,0]; self.state['wheels']=wheels; self.apply(checkpoint=False)
     def curve_changed(self,points):
         curves=copy.deepcopy(self.state.get('curves',{})); curves[self.curve_channel.currentText()]=copy.deepcopy(points); self.state['curves']=curves; self.apply(checkpoint=False)
+
+    def load_curve_points(self):
+        if hasattr(self,'curve'):
+            self.curve.points=copy.deepcopy(self.state.get('curves',{}).get(self.curve_channel.currentText(),[])); self.curve.update()
+
+    def load_hue_points(self):
+        if hasattr(self,'hue_curve'):
+            key=('sat','hue','lum','lumsat')[self.hue_channel.currentIndex()]; raw=self.state.get('hue',{}).get(key,[])
+            self.hue_curve.points=[[x/360,(y/180+1)/2 if key=='hue' else y/2 if key=='sat' else y] for x,y in raw]; self.hue_curve.update()
+
+    def hue_changed(self,points):
+        key=('sat','hue','lum','lumsat')[self.hue_channel.currentIndex()]
+        converted=[]
+        for x,y in points:
+            converted.append([x*360, (y*2-1)*180 if key=='hue' else y*2 if key=='sat' else y])
+        hue=copy.deepcopy(self.state.get('hue',{})); hue[key]=converted; self.state['hue']=hue; self.apply(checkpoint=False)
+
+    def pick_lut(self,key):
+        path,_=QFileDialog.getOpenFileName(self,'Scegli LUT','', 'LUT (*.cube)')
+        if path:self.set_lut(key,{'path':path,'amount':1.})
+
+    def set_lut(self,key,value):
+        self.e.checkpoint(); self.state[key]=value; self.apply(checkpoint=False); self.update_lut_ui()
+
+    def lut_amount(self,key,value):
+        item=copy.deepcopy(self.state.get(key,{})); item['amount']=value/100; self.state[key]=item; self.apply(checkpoint=False); self.update_lut_ui()
+
+    def update_lut_ui(self):
+        for key,(label,slider,warning) in self.lut_controls.items():
+            spec=self.state.get(key,{}) or {}; path=spec.get('path',''); label.setText(Path(path).name if path else 'Nessun file'); warning.setVisible(bool(path and not Path(path).is_file())); slider.blockSignals(True); slider.setValue(round(float(spec.get('amount',0))*100)); slider.blockSignals(False)
+
+    def reset_section(self,name):
+        self.e.checkpoint()
+        if name=='Automatico': self.state.update(look=grading.DEFAULT_LOOK,amount=1.,correct=True,match=True,basic=grading.normalized({})['basic'])
+        elif name=='Primarie': self.state['wheels']=grading.normalized({})['wheels']
+        elif name=='Curve': self.state['curves']={}
+        elif name=='Curve HSL': self.state['hue']={}
+        elif name=='LUT': self.state.update(inputLut={},creativeLut={})
+        self.apply(checkpoint=False); self.update_lut_ui()
+        self.amount.blockSignals(True); self.amount.setValue(round(self.state['amount']*100)); self.amount.blockSignals(False)
+        self.correct.setChecked(self.state['correct']); self.match.setChecked(self.state['match'])
+        self.select_look(self.state['look'])
+        for key,slider in self.basic_sliders.items():
+            slider.blockSignals(True); slider.setValue(round(self.state['basic'].get(key,0)*100)); slider.blockSignals(False)
+        for key,(wheel,master) in self.wheels.items():
+            wheel.xy=(0.,0.); wheel.update(); master.blockSignals(True); master.setValue(round(self.state['wheels'].get(key,[0,0,0])[1]*400)); master.blockSignals(False)
+        self.load_curve_points(); self.load_hue_points()
 
     def apply(self, checkpoint=True):
         if not self.targets: return
@@ -298,7 +386,7 @@ class GradingWindow(QDialog):
 
     def amount_moving(self, value):
         self.amount_label.setText(f'Intensità look: {value}%')
-        if self.amount.isSliderDown(): self.refresh_preview(amount=value / 100)
+        if self.amount.isSliderDown(): self.state['amount']=value/100; self.apply(checkpoint=False)
 
     def select_look(self, k):
         for i in range(self.looks.count()):

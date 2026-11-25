@@ -181,6 +181,14 @@ def build_ui(editor,Viewer,Bin,Timeline):
     color_menu=e.menuBar().addMenu('Colore')
     from color_grading import open_window
     action('Colore…',lambda:open_window(e),'Ctrl+G',color_menu)
+    def grade_command(name, shortcut=None):
+        def run():
+            w=getattr(e,'grading_window',None)
+            if w is None or not w.isVisible(): open_window(e); w=getattr(e,'grading_window',None)
+            if w is not None: getattr(w,name)()
+        return action({'copy_grade':'Copia grading','paste_grade':'Incolla grading','apply_all':'Applica a tutte le clip','apply_track':'Applica alla traccia'}[name],run,shortcut,color_menu)
+    grade_command('copy_grade','Ctrl+Shift+C'); grade_command('paste_grade','Ctrl+Shift+V')
+    grade_command('apply_all'); grade_command('apply_track')
     performance=e.menuBar().addMenu('Fluidità')
     action('Crea proxy delle clip selezionate',e.start_proxies,None,performance)
     action('Interrompi preparazione proxy',e.cancel_proxies,None,performance)

@@ -14,3 +14,4 @@ node_modules/
 *.pdb
 __pycache__/
 *.pyc
+windows/Windows/.test-appdata*/
