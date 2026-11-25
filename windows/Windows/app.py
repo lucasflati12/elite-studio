@@ -356,7 +356,7 @@ def gui(initial=None):
             for _ in range(2):
                 player=QMediaPlayer(self); output=QAudioOutput(self); player.setAudioOutput(output); self.audio.append([player,output,None])
             self.setWindowTitle('Elite Studio · Windows'); self.resize(1280,800)
-            icon=ROOT.parent/'assets'/'icon.png'
+            icon=next((p for p in (ROOT/'Resources'/'EliteStudio.ico',ROOT.parent/'assets'/'icon.png') if p.exists()),ROOT/'Resources'/'EliteStudio.ico')
             if icon.exists(): self.setWindowIcon(QIcon(str(icon)))
             self.build_ui()
             from playback import SequencePreview

@@ -38,11 +38,40 @@ struct TitleCard: Hashable {
 }
 
 struct TimelineMarker: Codable, Hashable { var t = 0.0; var name = ""; var color = "#e4ca4a" }
-struct Crop: Codable, Hashable { var left = 0.0; var right = 0.0; var top = 0.0; var bottom = 0.0 }
-struct ClipBackground: Codable, Hashable { var type = "blur"; var amount = 12.0 }
-struct ClipTransition: Codable, Hashable { var type = "Dissolvenza al nero"; var duration = 0.5 }
-struct ChromaKey: Codable, Hashable { var color = "#00ff00"; var tolerance = 0.12; var softness = 0.08 }
-struct SpeedRamp: Codable, Hashable { var preset = "Montagna"; var segment = 0; var points: [Double] = [1, 1, 1] }
+struct Crop: Codable, Hashable {
+    var left = 0.0; var right = 0.0; var top = 0.0; var bottom = 0.0
+    enum K: String, CodingKey { case left, right, top, bottom }
+    init() {}
+    init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: K.self); left = c.get(.left, 0); right = c.get(.right, 0); top = c.get(.top, 0); bottom = c.get(.bottom, 0) }
+}
+struct ClipBackground: Codable, Hashable {
+    var type = "blur"; var amount = 12.0
+    enum K: String, CodingKey { case type, amount }
+    init() {}
+    init(type: String = "blur", amount: Double = 12) { self.type = type; self.amount = amount }
+    init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: K.self); type = c.get(.type, "blur"); amount = c.get(.amount, 12) }
+}
+struct ClipTransition: Codable, Hashable {
+    var type = "Dissolvenza al nero"; var duration = 0.5
+    enum K: String, CodingKey { case type, duration }
+    init() {}
+    init(type: String = "Dissolvenza al nero", duration: Double = 0.5) { self.type = type; self.duration = duration }
+    init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: K.self); type = c.get(.type, "Dissolvenza al nero"); duration = max(0.05, c.get(.duration, 0.5)) }
+}
+struct ChromaKey: Codable, Hashable {
+    var color = "#00ff00"; var tolerance = 0.12; var softness = 0.08
+    enum K: String, CodingKey { case color, tolerance, softness }
+    init() {}
+    init(color: String = "#00ff00", tolerance: Double = 0.12, softness: Double = 0.08) { self.color = color; self.tolerance = tolerance; self.softness = softness }
+    init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: K.self); color = c.get(.color, "#00ff00"); tolerance = min(0.5, max(0.001, c.get(.tolerance, 0.12))); softness = min(0.5, max(0.001, c.get(.softness, 0.08))) }
+}
+struct SpeedRamp: Codable, Hashable {
+    var preset = "Montagna"; var segment = 0; var points: [Double] = [1, 1, 1]
+    enum K: String, CodingKey { case preset, segment, points }
+    init() {}
+    init(preset: String, segment: Int, points: [Double]) { self.preset = preset; self.segment = segment; self.points = points }
+    init(from decoder: Decoder) throws { let c = try decoder.container(keyedBy: K.self); preset = c.get(.preset, "Montagna"); segment = c.get(.segment, 0); points = c.get(.points, [1, 1, 1]) }
+}
 struct FreezeSource: Codable, Hashable { var media: String; var time: Double }
 struct ReverseSource: Codable, Hashable { var media: String; var `in`: Double; var duration: Double }
 

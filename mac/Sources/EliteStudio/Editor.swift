@@ -412,6 +412,7 @@ final class Editor: ObservableObject {
         }
         edit { p in
             guard let i = p.clips.firstIndex(where: { $0.id == c.id }) else { return }
+            let following = Set(p.clips.filter { $0.id != c.id && $0.start >= c.end - 1e-6 }.map(\.id))
             let sourceLength = c.sourceDuration, part = sourceLength / 3
             p.clips.remove(at: i)
             var cursor = c.start
@@ -421,6 +422,9 @@ final class Editor: ObservableObject {
                 seg.speedRamp = SpeedRamp(preset: preset.titleOfSelectedItem ?? "Montagna", segment: n, points: speeds)
                 cursor += seg.duration; p.clips.append(seg)
             }
+            let delta = cursor - c.end
+            for j in p.clips.indices where following.contains(p.clips[j].id) { p.clips[j].start += delta }
+            p.shiftCaptions(after: c.end, by: delta)
         }
     }
 
@@ -542,18 +546,25 @@ final class Editor: ObservableObject {
     }
 
     func exportFrame() {
-        guard let c = project.clips.first(where: { selection.contains($0.id) && !$0.isTitle }),
-              let media = project.media(c.mediaID), let runtime = cache.runtimes[media.id] else { status = "Seleziona una clip video"; return }
         let panel = NSSavePanel(); panel.allowedContentTypes = [UTType.png]; panel.nameFieldStringValue = "Fotogramma.png"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            let generator = AVAssetImageGenerator(asset: runtime.asset); generator.appliesPreferredTrackTransform = true
-            let sourceTime = max(0, c.sourceTime(at: clock.time))
-            let image = try generator.copyCGImage(at: CMTime(seconds: sourceTime, preferredTimescale: 600), actualTime: nil)
-            guard let dest = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil) else { throw NSError(domain: "EliteStudio", code: 42) }
-            CGImageDestinationAddImage(dest, image, nil); guard CGImageDestinationFinalize(dest) else { throw NSError(domain: "EliteStudio", code: 43) }
-            status = "Fotogramma esportato"
-        } catch { status = "Esportazione fotogramma non riuscita: \(error.localizedDescription)" }
+        let snapshot = project, at = clock.time
+        Task { @MainActor in
+            do {
+                for media in snapshot.media where cache.runtimes[media.id] == nil { _ = await cache.prepare(media, background: false) }
+                let composition = CompositionBuilder.build(snapshot, cache: cache)
+                let generator = AVAssetImageGenerator(asset: composition.composition)
+                generator.appliesPreferredTrackTransform = true
+                if let vc = CompositionBuilder.videoComposition(composition, project: snapshot, cache: cache, burnOverlays: true) {
+                    CompositionBuilder.addOverlays(to: vc, project: snapshot)
+                    generator.videoComposition = vc
+                }
+                let image = try generator.copyCGImage(at: CMTime(seconds: at, preferredTimescale: 600), actualTime: nil)
+                guard let dest = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil) else { throw NSError(domain: "EliteStudio", code: 42) }
+                CGImageDestinationAddImage(dest, image, nil); guard CGImageDestinationFinalize(dest) else { throw NSError(domain: "EliteStudio", code: 43) }
+                status = "Fotogramma esportato"
+            } catch { status = "Esportazione fotogramma non riuscita: \(error.localizedDescription)" }
+        }
     }
 
     func razor(_ id: ID, at t: Double, allTracks: Bool) {

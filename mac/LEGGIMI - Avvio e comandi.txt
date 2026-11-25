@@ -54,3 +54,7 @@ DOCUMENTAZIONE TECNICA.md descrive formato JSON e comandi Mac.
 VERIFICHE.md riporta i controlli svolti e quelli che richiedono ancora un Mac.
 
 Round 2 colore: aggiunti i controlli Bianchi, Neri e Vividezza nella pagina Colore macOS. La parit� dei controlli avanzati resta in corso; consultare CODEX_REPORT.md.
+
+ROUND 3C - MONTAGGIO CONDIVISO
+
+M aggiunge un marker; Shift+M e Cmd+Shift+M passano al marker successivo e precedente. Cmd+R apre Velocità/Durata con curve Montagna, Bullet, Ingresso veloce e Uscita veloce. Shift+F inserisce un fermo immagine di 2 secondi. Nell'ispettore Clip sono disponibili ritaglio, specchio, sfondo sfocato e chroma key; Transizioni offre dissolve, scorrimenti, zoom, wipe e sfocatura. I titoli hanno animazioni e stili. Cmd+Shift+E esporta il fotogramma della sequenza corrente in PNG. A seleziona le clip a destra del playhead; virgola e punto spostano la selezione di un fotogramma. Sequenza include separazione audio, ducking e chiusura spazi. La riduzione rumore è salvata nel progetto, ma è disponibile solo nell'export Windows. Il formato JSON condiviso è documentato in ../docs/FORMATO-MONTAGGIO.md.

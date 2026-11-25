@@ -168,7 +168,7 @@ struct EliteStudioApp: App {
                 Button("Taglia al playhead") { editor.addEdit() }.keyboardShortcut("k")
                 Button("Velocità / Durata e curve…") { editor.editSpeedAndRamp() }.keyboardShortcut("r")
                 Button("Aggiungi fermo immagine · 2 s") { editor.freezeFrame() }.keyboardShortcut("f", modifiers: [.shift])
-                Button("Aggiungi marker") { editor.addMarker() }.keyboardShortcut("m")
+                Button("Aggiungi marker") { editor.addMarker() }.keyboardShortcut("m", modifiers: [])
                 Button("Marker successivo") { editor.jumpMarker(true) }.keyboardShortcut("m", modifiers: [.shift])
                 Button("Marker precedente") { editor.jumpMarker(false) }.keyboardShortcut("m", modifiers: [.command, .shift])
                 Button("Transizioni…") { editor.addTransition() }
@@ -176,7 +176,7 @@ struct EliteStudioApp: App {
                 Button("Disattiva audio della clip") { editor.toggleAudioDisabled() }
                 Button("Separa audio dalla clip") { editor.separateAudio() }
                 Button("Abbassa musica sotto la voce") { editor.duckMusic() }
-                Button("Seleziona clip a destra del playhead") { editor.selectRightOfPlayhead() }.keyboardShortcut("a")
+                Button("Seleziona clip a destra del playhead") { editor.selectRightOfPlayhead() }.keyboardShortcut("a", modifiers: [])
                 Button("Chiudi spazi sulla traccia selezionata") { editor.closeGaps() }
                 Button("Inverti clip (prepara file cache)") { editor.status = "Inversione video tramite file intermedio non ancora disponibile su Mac" }
                 Button("Esporta fotogramma PNG…") { editor.exportFrame() }.keyboardShortcut("e", modifiers: [.command, .shift])
