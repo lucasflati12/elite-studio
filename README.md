@@ -1,3 +1,5 @@
+<img src="assets/icon.png" width="96" alt="Elite Studio icon">
+
 # Elite Studio
 
 A lightweight video editor I built for my own reels — and the workflow where an AI does the editing.
