@@ -35,7 +35,7 @@ def proxy(media,cancel=None):
     if not media.get('hasVideo') or media.get('still') or media.get('pano'): return None
     key=fingerprint(media['path']); CACHE.mkdir(parents=True,exist_ok=True); target=CACHE/f'proxy-{key}.mp4'
     if target.is_file(): return str(target),key
-    part=target.with_suffix('.part.mp4'); prune()
+    part=target.with_name(f'{target.stem}.{os.getpid()}.part.mp4'); prune()   # one temp file per app instance
     scale="scale=w='max(2,trunc(iw*min(1,960/max(iw,ih))/2)*2)':h='max(2,trunc(ih*min(1,960/max(iw,ih))/2)*2)'"
     with part.with_suffix('.log').open('w+b') as log:
         proc=subprocess.Popen([tool('ffmpeg'),'-v','error','-y','-i',media['path'],'-map','0:v:0','-vf',scale,

@@ -238,7 +238,7 @@ def gui(initial=None):
             if not self.drag:
                 c=self.at(pos); edge=c and min(abs(pos.x()-self.clip_rect(c).left()),abs(pos.x()-self.clip_rect(c).right()))<min(7,max(1,self.clip_rect(c).width()*.2))
                 self.setCursor(Qt.CursorShape.SizeHorCursor if edge else Qt.CursorShape.ArrowCursor); return
-            if self.drag[0]=='scrub': self.editor.seek(self.time_at(pos.x())); return
+            if self.drag[0]=='scrub': self.editor.scrub(self.time_at(pos.x())); return
             if self.drag[0]=='box':
                 self.editor.gap=None
                 _,origin,_,base=self.drag; self.drag=('box',origin,pos,base); rect=QRectF(origin,pos).normalized()
@@ -804,6 +804,15 @@ def gui(initial=None):
             else: self.render_preview(); self.sync_audio(True)
             if not self.playing and hasattr(self,'effect_fields'):
                 self.updating=True; self.update_effect_fields(); self.updating=False
+        def scrub(self,position):
+            """Timeline drag: the playhead follows the mouse at once; if frames are slow to decode (4K/10-bit without proxy)
+            the picture is rendered when the mouse rests, instead of blocking on every move."""
+            self.position=max(0,min(float(position),self.project.duration))
+            if self.sequence_preview.valid or getattr(self,'render_cost',0)<.08: self.seek(self.position); return
+            self.update_clock()
+            if not hasattr(self,'scrub_timer'):
+                self.scrub_timer=QTimer(self); self.scrub_timer.setSingleShot(True); self.scrub_timer.setInterval(120); self.scrub_timer.timeout.connect(lambda:self.seek(self.position))
+            self.scrub_timer.start()
         def toggle(self): self.pause() if self.playing else self.play()
         def play(self):
             if not self.project.duration: return
@@ -900,6 +909,10 @@ def gui(initial=None):
         def render_preview(self):
             if hasattr(self,'sequence_preview') and self.sequence_preview.valid:
                 self.update_clock(); return
+            started=time.perf_counter()
+            try: self._render_preview()
+            finally: self.render_cost=time.perf_counter()-started
+        def _render_preview(self):
             w0,h0=int(self.project.settings['width']),int(self.project.settings['height'])
             ratio=min(max(100,self.viewer.width()-8)/w0,max(100,self.viewer.height()-8)/h0,getattr(self,'preview_limit',720)/max(w0,h0))
             w,h=max(2,int(w0*ratio)),max(2,int(h0*ratio)); canvas=Image.new('RGBA',(w,h),'black'); tracks=self.project.data['tracks']; warning=False
