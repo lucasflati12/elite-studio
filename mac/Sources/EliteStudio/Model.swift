@@ -117,6 +117,10 @@ struct Clip: Identifiable, Hashable {
 
     var end: Double { start + duration }
     var isTitle: Bool { title != nil }
+    /// Entirely silent clips need no audio samples in the composition.
+    var hasAudibleAudio: Bool {
+        effects.keys.isEmpty ? volume > 0 : effects.keys.contains { $0.volume > 0 }
+    }
     /// How much of the media file the clip uses.
     var sourceDuration: Double { duration * speed }
     /// Position inside the media file at timeline time `t`.

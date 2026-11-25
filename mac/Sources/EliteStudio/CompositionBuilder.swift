@@ -60,7 +60,7 @@ enum CompositionBuilder {
             if !p.tracks.audioMuted[lane],
                let track = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
                 var cursor: Int64 = 0
-                for c in clips {
+                for c in clips where c.hasAudibleAudio {
                     guard let m = p.media(c.mediaID), !c.audioDisabled, let rt = cache.runtimes[m.id], let src = rt.audio, let range = rt.audioRange else { continue }
                     if let seg = insert(c, src: src, available: range, into: track, cursor: &cursor, lane: lane) { aSegs.append(seg) }
                 }
@@ -222,12 +222,24 @@ enum CompositionBuilder {
         for (lane, tid) in b.audioTrackIDs {
             guard let ct = b.composition.track(withTrackID: tid) else { continue }
             let ip = AVMutableAudioMixInputParameters(track: ct)
-            for seg in b.audio where seg.lane == lane {
+            // A track can begin well after time zero. Set its initial gain explicitly,
+            // then cover every audible range so the first buffer never uses unity gain.
+            ip.setVolume(0, at: .zero)
+            var previousEnd: Int64 = 0
+            for seg in b.audio.filter({ $0.lane == lane }).sorted(by: { $0.start < $1.start }) {
                 guard let c = clipsByID[seg.clipID] else { continue }
+                let firstGain = Float(c.motion(at: c.start).volume * c.envelope(at: c.start, audio: true))
+                if seg.start > previousEnd {
+                    ip.setVolume(firstGain, at: time(seg.start - 1))
+                }
+                previousEnd = seg.end
                 // keys that only move the picture (e.g. stabilization, one per frame) leave the volume flat
                 let flatKeys = c.effects.keys.allSatisfy { abs($0.volume - (c.effects.keys.first?.volume ?? 1)) < 1e-6 }
                 if c.effects.audioFadeIn == 0 && c.effects.audioFadeOut == 0 && (c.effects.keys.isEmpty || flatKeys) {
-                    ip.setVolume(Float(c.effects.keys.first?.volume ?? c.volume), at: time(seg.start)); continue
+                    let gain = Float(c.effects.keys.first?.volume ?? c.volume)
+                    ip.setVolumeRamp(fromStartVolume: gain, toEndVolume: gain,
+                                     timeRange: CMTimeRange(start: time(seg.start), end: time(seg.end)))
+                    continue
                 }
                 let duration = Double(seg.end - seg.start) / Double(timescale)
                 var boundaries = Set<Double>([0, duration, min(duration, c.effects.audioFadeIn), max(0, duration - c.effects.audioFadeOut)])

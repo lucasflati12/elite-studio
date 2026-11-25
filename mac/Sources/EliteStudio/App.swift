@@ -8,7 +8,7 @@ enum Entry {
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--export") {
             guard args.count > i + 2 else { CLI.usage() }
-            CLI.run { try await CLI.export(project: args[i + 1], output: args[i + 2], hevc: args.contains("--hevc")) }
+            CLI.run { try await CLI.export(project: args[i + 1], output: args[i + 2], hevc: args.contains("--hevc"), uhd: args.contains("--4k")) }
         } else if let i = args.firstIndex(of: "--captions") {
             guard args.count > i + 1 else { CLI.usage() }
             func opt(_ k: String) -> String? { args.firstIndex(of: k).flatMap { args.count > $0 + 1 ? args[$0 + 1] : nil } }
@@ -24,12 +24,12 @@ enum Entry {
 
 /// Command line, for scripts and Claude Code:
 ///   EliteStudio --check  project.elitestudio            prints the timeline as the app will read it
-///   EliteStudio --export project.elitestudio out.mp4    renders it (add --hevc for HEVC)
+///   EliteStudio --export project.elitestudio out.mp4    renders it (add --hevc for HEVC, --4k for 4K)
 ///   EliteStudio --captions project.elitestudio          transcribes the audio and writes captions into the project
 @MainActor
 enum CLI {
     static func usage() -> Never {
-        print("uso:\n  EliteStudio --check progetto.elitestudio\n  EliteStudio --export progetto.elitestudio uscita.mp4 [--hevc]\n  EliteStudio --captions progetto.elitestudio [--lang it-IT] [--words 3]")
+        print("uso:\n  EliteStudio --check progetto.elitestudio\n  EliteStudio --export progetto.elitestudio uscita.mp4 [--hevc] [--4k]\n  EliteStudio --captions progetto.elitestudio [--lang it-IT] [--words 3]")
         exit(2)
     }
 
@@ -78,8 +78,9 @@ enum CLI {
         print("ok: \(p.captions.count) sottotitoli, \(w.count) parole → \(u.path)")
     }
 
-    static func export(project: String, output: String, hevc: Bool) async throws {
-        let p = try await load(project)
+    static func export(project: String, output: String, hevc: Bool, uhd: Bool = false) async throws {
+        var p = try await load(project)
+        if uhd { (p.settings.width, p.settings.height) = uhdSize(p.settings.width, p.settings.height) }
         var last = -1
         try await Exporter.run(project: p, to: url(output), hevc: hevc) { pr in
             let pct = Int(pr * 100)
@@ -252,16 +253,24 @@ enum Commands {
         options.informativeText = "Scegli formato e codec. Il progetto di montaggio resta invariato."
         options.addButton(withTitle: "Continua"); options.addButton(withTitle: "Annulla")
         let box = NSStackView(); box.orientation = .vertical; box.spacing = 8; box.frame = CGRect(x: 0, y: 0, width: 280, height: 70)
-        let format = NSPopUpButton(frame: .zero, pullsDown: false); format.addItems(withTitles: ["Formato della sequenza", "Verticale · 1080×1920", "Orizzontale · 1920×1080", "Quadrato · 1080×1080", "Anteprima · lato lungo 720"])
+        let seq4k = uhdSize(editor.project.settings.width, editor.project.settings.height)
+        let format = NSPopUpButton(frame: .zero, pullsDown: false)
+        format.addItems(withTitles: ["Formato della sequenza", "Formato della sequenza in 4K · \(seq4k.0)×\(seq4k.1)",
+                                     "Verticale · 1080×1920", "Verticale 4K · 2160×3840",
+                                     "Orizzontale · 1920×1080", "Orizzontale 4K · 3840×2160",
+                                     "Quadrato · 1080×1080", "Anteprima · lato lungo 720"])
         let codec = NSPopUpButton(frame: .zero, pullsDown: false); codec.addItems(withTitles: ["H.264 · compatibilità", "HEVC · file più piccolo"])
         box.addArrangedSubview(format); box.addArrangedSubview(codec); options.accessoryView = box
         guard options.runModal() == .alertFirstButtonReturn else { return }
         var width = editor.project.settings.width, height = editor.project.settings.height
         switch format.indexOfSelectedItem {
-        case 1: width = 1080; height = 1920
-        case 2: width = 1920; height = 1080
-        case 3: width = 1080; height = 1080
-        case 4:
+        case 1: (width, height) = seq4k
+        case 2: width = 1080; height = 1920
+        case 3: width = 2160; height = 3840
+        case 4: width = 1920; height = 1080
+        case 5: width = 3840; height = 2160
+        case 6: width = 1080; height = 1080
+        case 7:
             let factor = min(1, 720.0 / Double(max(width, height)))
             width = max(2, Int((Double(width) * factor / 2).rounded()) * 2)
             height = max(2, Int((Double(height) * factor / 2).rounded()) * 2)
@@ -333,4 +342,10 @@ enum KeyHandler {
         }
         return true
     }
+}
+
+/// The same frame shape with the short side at 2160 px (4K UHD): 1920×1080 → 3840×2160, 1080×1920 → 2160×3840.
+func uhdSize(_ w: Int, _ h: Int) -> (Int, Int) {
+    let k = 2160.0 / Double(max(1, min(w, h)))
+    return (Int((Double(w) * k / 2).rounded()) * 2, Int((Double(h) * k / 2).rounded()) * 2)
 }

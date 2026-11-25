@@ -20,12 +20,12 @@ razor, trim, ripple delete, Coppa Élite name cards, MP4 export. Native Swift + 
 | Q / W | remove from the clip start to the playhead / from the playhead to the clip end, closing the gap |
 | ⌘T | add a name card at the playhead |
 | Sottotitoli button | automatic captions from the timeline audio (see below) |
-| S | snapping on/off · = / - zoom · \ fit timeline |
+| S | snapping on/off · = / - zoom (centred on the playhead) · \ fit timeline |
 | ⌘Z / ⇧⌘Z | undo / redo · ⌘C / ⌘V copy / paste clips at the playhead |
 | ⌘I import · ⌘S save · ⌘E export | |
 
 Mouse: drag on an empty spot to draw a selection box (like a Finder folder; Shift/⌘ adds to the selection), then drag any selected clip to move them all together; drag clips to move them (also between V1 and V2), drag clip edges to trim, click the ruler to scrub,
-click an empty spot between clips then ⌫ to close that gap, ⌘/⌥ + scroll or pinch to zoom, drag files from the bin or Finder onto the timeline.
+click an empty spot between clips then ⌫ to close that gap, ⌘/⌥ + scroll or pinch to zoom (the zoom stays centred on the playhead), scroll up/down to reach every track when there are many, drag files from the bin or Finder onto the timeline.
 Dropping a clip on top of another one overwrites it (like Premiere). Changes save automatically to the open project file.
 
 ## Project file format (`.elitestudio`, plain JSON)
@@ -69,12 +69,18 @@ Legacy logo settings are ignored.
 
 When the app saves, it writes the full form (ids, media list with durations, relative paths). Both forms read the same way.
 
+## Export
+
+**File ▸ Esporta** (⌘E) offers the sequence format, the sequence format in **4K** (short side 2160 px: 16:9 → 3840×2160,
+9:16 → 2160×3840), vertical / horizontal 1080p and 4K, square, and a 720p preview, in H.264 or HEVC.
+4K export upscales sources smaller than 4K: shoot or keep 4K media for a real 4K result.
+
 ## Command line
 
 ```bash
 ES="/Users/lucasflati/Desktop/Elite Studio Mac/elitestudio"
 "$ES" --check  progetto.elitestudio             # prints the timeline as the app reads it; errors on missing files
-"$ES" --export progetto.elitestudio out.mp4     # renders it (same engine as the app; --hevc for HEVC)
+"$ES" --export progetto.elitestudio out.mp4     # renders it (same engine as the app; --hevc for HEVC, --4k for 4K UHD)
 "$ES" --captions progetto.elitestudio           # transcribes the audio and writes captions into the project [--lang it-IT] [--words 3]
 open progetto.elitestudio                       # opens it in the app to keep editing
 ```

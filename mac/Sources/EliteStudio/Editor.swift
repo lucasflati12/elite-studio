@@ -155,7 +155,7 @@ final class Editor: ObservableObject {
     private func structureKey() -> [String] {
         let t = project.tracks
         return project.clips.filter { !$0.isTitle }.map {
-            "\($0.id)|\($0.mediaID ?? "")|\($0.track)|\(CompositionBuilder.ticks($0.start))|\(CompositionBuilder.ticks($0.duration))|\(CompositionBuilder.ticks($0.sourceIn))|\($0.speed)"
+            "\($0.id)|\($0.mediaID ?? "")|\($0.track)|\(CompositionBuilder.ticks($0.start))|\(CompositionBuilder.ticks($0.duration))|\(CompositionBuilder.ticks($0.sourceIn))|\($0.speed)|\($0.hasAudibleAudio)"
         }.sorted() + ["\(t.videoHidden)\(t.audioMuted)", "\(project.media.map(\.id))", "\(cache.runtimes.count)"]
     }
 

@@ -64,7 +64,7 @@ final class TimelineNSView: NSView {
         super.init(frame: .zero)
         wantsLayer = true
         registerForDraggedTypes([.string, .fileURL])
-        editor.objectWillChange.sink { [weak self] _ in DispatchQueue.main.async { self?.needsDisplay = true } }.store(in: &bag)
+        editor.objectWillChange.sink { [weak self] _ in DispatchQueue.main.async { self?.syncHeight(); self?.needsDisplay = true } }.store(in: &bag)
         MediaCache.shared.$revision.sink { [weak self] _ in DispatchQueue.main.async { self?.needsDisplay = true } }.store(in: &bag)
         editor.clock.$time.sink { [weak self] t in self?.playheadMoved(t) }.store(in: &bag)
         editor.fitTimeline = { [weak self] in self?.fit() }
@@ -72,6 +72,34 @@ final class TimelineNSView: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    /// Keeps the view as tall as all its lanes, so the enclosing scroll view can scroll down to the last track
+    /// (the number of lanes changes when a project with more tracks is opened).
+    func syncHeight() {
+        guard let sv = enclosingScrollView else { return }
+        let h = max(sv.contentSize.height, requiredHeight)
+        let w = max(100, sv.contentSize.width)
+        if abs(frame.height - h) > 0.5 || abs(frame.width - w) > 0.5 { setFrameSize(NSSize(width: w, height: h)) }
+    }
+
+    private var scrollBag: Set<AnyCancellable> = []
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        scrollBag.removeAll()
+        guard let clip = superview as? NSClipView else { return }
+        clip.postsBoundsChangedNotifications = true
+        clip.postsFrameChangedNotifications = true
+        // ruler and scrollbar are pinned to the visible area: redraw while scrolling vertically
+        NotificationCenter.default.publisher(for: NSView.boundsDidChangeNotification, object: clip)
+            .sink { [weak self] _ in self?.needsDisplay = true }.store(in: &scrollBag)
+        NotificationCenter.default.publisher(for: NSView.frameDidChangeNotification, object: clip)
+            .sink { [weak self] _ in self?.syncHeight(); self?.needsDisplay = true }.store(in: &scrollBag)
+        DispatchQueue.main.async { [weak self] in self?.syncHeight() }
+    }
+
+    /// Top / bottom of the part of the timeline that is on screen (the view can be taller than its scroll view).
+    private var topY: CGFloat { visibleRect.height > 0 ? visibleRect.minY : 0 }
+    private var bottomY: CGFloat { visibleRect.height > 0 ? visibleRect.maxY : bounds.height }
 
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
@@ -102,7 +130,7 @@ final class TimelineNSView: NSView {
         return nil
     }
 
-    private var scrollbarRect: CGRect { CGRect(x: headerW, y: bounds.height - barH, width: bounds.width - headerW, height: barH) }
+    private var scrollbarRect: CGRect { CGRect(x: headerW, y: bottomY - barH, width: bounds.width - headerW, height: barH) }
 
     private func lanes(of c: Clip) -> [Lane] {
         if c.isTitle { return [.title] }
@@ -135,11 +163,15 @@ final class TimelineNSView: NSView {
 
     // MARK: - zoom / scroll
 
+    /// Zoom always centred on the playhead (the time being played), whatever started it: pinch, ⌘/⌥-scroll,
+    /// the zoom slider or the = / - keys. The playhead keeps its place on screen; if it was off screen it ends up
+    /// in the middle of the timeline. `anchorX` is ignored on purpose.
     func setZoom(_ newPPS: Double, anchorX: CGFloat? = nil) {
-        let ax = anchorX ?? min(max(x(editor.clock.time), headerW), bounds.width)
-        let at = t(ax)
+        let ph = editor.clock.time
+        let phx = x(ph)
+        let ax = (phx >= headerW && phx <= bounds.width) ? phx : headerW + (bounds.width - headerW) / 2
         editor.pixelsPerSecond = min(800, max(1, newPPS))
-        scrollT = max(0, at - Double(ax - headerW) / pps)
+        scrollT = max(0, ph - Double(ax - headerW) / pps)
         needsDisplay = true
     }
 
@@ -220,8 +252,8 @@ final class TimelineNSView: NSView {
             needsDisplay = true
             return
         }
-        if p.x < headerW { headerClick(p); return }
-        if p.y < rulerH {
+        if p.x < headerW { if p.y >= topY + rulerH { headerClick(p) }; return }
+        if p.y < topY + rulerH {
             editor.pause()
             editor.seek(max(0, t(p.x)))
             drag = .scrub
@@ -363,7 +395,7 @@ final class TimelineNSView: NSView {
 
         let sx = x(startT)
         let px = min(max(p.x, headerW), bounds.width)
-        let top = rulerH, bottom = bounds.height - barH
+        let top = topY + rulerH, bottom = bottomY - barH
         let r = CGRect(x: min(sx, px), y: max(top, min(startY, p.y)),
                        width: abs(px - sx), height: abs(min(max(p.y, top), bottom) - startY))
         // ignore tiny wiggles so a plain click still selects the gap
@@ -482,7 +514,7 @@ final class TimelineNSView: NSView {
             (abs(p.x - r.minX) <= edge || abs(p.x - r.maxX) <= edge ? NSCursor.resizeLeftRight : NSCursor.arrow).set()
             return
         }
-        guard p.x > headerW, p.y > rulerH, let c = hitClip(p), let lane = laneAt(p.y) else { NSCursor.arrow.set(); return }
+        guard p.x > headerW, p.y > topY + rulerH, let c = hitClip(p), let lane = laneAt(p.y) else { NSCursor.arrow.set(); return }
         if editor.tool == .razor { NSCursor.crosshair.set(); return }
         let r = clipRect(c, lane)
         let edge: CGFloat = min(7, r.width / 3)
@@ -606,7 +638,7 @@ final class TimelineNSView: NSView {
         }
         if let s = snapLine {
             gold.setFill()
-            CGRect(x: x(s) - 0.5, y: rulerH, width: 1, height: bounds.height - rulerH - barH).fill()
+            CGRect(x: x(s) - 0.5, y: topY + rulerH, width: 1, height: bottomY - topY - rulerH - barH).fill()
         }
         if let m = marqueeRect {
             NSColor(white: 1, alpha: 0.08).setFill(); m.fill()
@@ -626,11 +658,12 @@ final class TimelineNSView: NSView {
         let px = x(editor.clock.time)
         if px >= headerW {
             playheadColor.setFill()
-            CGRect(x: px - 0.5, y: rulerH - 6, width: 1.5, height: bounds.height - rulerH - barH + 6).fill()
+            let y0 = topY
+            CGRect(x: px - 0.5, y: y0 + rulerH - 6, width: 1.5, height: bottomY - y0 - rulerH - barH + 6).fill()
             let head = NSBezierPath()
-            head.move(to: CGPoint(x: px - 6, y: 2)); head.line(to: CGPoint(x: px + 6, y: 2))
-            head.line(to: CGPoint(x: px + 6, y: rulerH - 10)); head.line(to: CGPoint(x: px, y: rulerH - 4))
-            head.line(to: CGPoint(x: px - 6, y: rulerH - 10)); head.close()
+            head.move(to: CGPoint(x: px - 6, y: y0 + 2)); head.line(to: CGPoint(x: px + 6, y: y0 + 2))
+            head.line(to: CGPoint(x: px + 6, y: y0 + rulerH - 10)); head.line(to: CGPoint(x: px, y: y0 + rulerH - 4))
+            head.line(to: CGPoint(x: px - 6, y: y0 + rulerH - 10)); head.close()
             head.fill()
         }
     }
@@ -756,8 +789,9 @@ final class TimelineNSView: NSView {
     }
 
     private func drawRuler() {
+        let y0 = topY          // the ruler stays at the top of the visible area
         headerBG.setFill()
-        CGRect(x: headerW, y: 0, width: bounds.width - headerW, height: rulerH).fill()
+        CGRect(x: 0, y: y0, width: bounds.width, height: rulerH).fill()
         let a: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 9.5, weight: .medium), .foregroundColor: NSColor(white: 1, alpha: 0.55)]
         let steps: [Double] = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800]
         let major = steps.first { $0 * pps >= 70 } ?? 3600
@@ -770,11 +804,11 @@ final class TimelineNSView: NSView {
             let px = x(tt)
             let isMajor = i % 5 == 0
             if px >= headerW {
-                CGRect(x: px, y: isMajor ? rulerH - 10 : rulerH - 4, width: 1, height: isMajor ? 10 : 4).fill()
+                CGRect(x: px, y: y0 + (isMajor ? rulerH - 10 : rulerH - 4), width: 1, height: isMajor ? 10 : 4).fill()
                 if isMajor {
                     let r = (tt * 100).rounded() / 100
                     let s = major < 1 ? String(format: "%@.%02d", formatShort(r), Int((r * 100).rounded()) % 100) : formatShort(r + 0.001)
-                    (s as NSString).draw(at: CGPoint(x: px + 3, y: 3), withAttributes: a)
+                    (s as NSString).draw(at: CGPoint(x: px + 3, y: y0 + 3), withAttributes: a)
                 }
             }
             i += 1
@@ -795,12 +829,12 @@ final class TimelineNSView: NSView {
             }
         }
         NSColor(white: 1, alpha: 0.15).setFill()
-        CGRect(x: 0, y: rulerH - 1, width: bounds.width, height: 1).fill()
+        CGRect(x: 0, y: y0 + rulerH - 1, width: bounds.width, height: 1).fill()
     }
 
     private func drawScrollbar() {
         let r = scrollbarRect
-        headerBG.setFill(); r.fill()
+        headerBG.setFill(); CGRect(x: 0, y: r.minY, width: bounds.width, height: r.height).fill()
         let total = contentSeconds
         let w = max(30, r.width * CGFloat(min(1, visibleSeconds / total)))
         let xx = r.minX + (r.width - w) * CGFloat(min(1, scrollT / max(0.001, total - visibleSeconds)))
@@ -835,7 +869,7 @@ struct TimelineView: NSViewRepresentable {
     }
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         guard let v = scroll.documentView as? TimelineNSView else { return }
-        v.setFrameSize(NSSize(width: max(100, scroll.contentSize.width), height: max(scroll.contentSize.height, v.requiredHeight)))
+        v.syncHeight()
         v.needsDisplay = true
     }
 }

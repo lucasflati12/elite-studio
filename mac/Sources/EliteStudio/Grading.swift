@@ -871,7 +871,7 @@ struct GradingView: View {
     }
     private var wheelBinding: Binding<CGPoint> { Binding(get: { let a = wheelArray; return CGPoint(x: a[0] / 0.25, y: a[1] / 0.25) }, set: { wheelSet($0); wheelMaster = min(1, sqrt($0.x * $0.x + $0.y * $0.y)) }) }
     private var wheelArray: [Double] { switch wheelName { case "gamma": return model.wheels.gamma; case "gain": return model.wheels.gain; case "offset": return model.wheels.offset; default: return model.wheels.lift } }
-    private func wheelSet(_ p: CGPoint) { let x = min(1, max(-1, p.x)); let y = min(1, max(-1, p.y)); let z = -(0.2126 * x + 0.7152 * y) / 0.0722; let v = [0.25 * x, 0.25 * y, 0.25 * z]; switch wheelName { case "gamma": model.wheels.gamma = v; case "gain": model.wheels.gain = v; case "offset": model.wheels.offset = v; default: model.wheels.lift = v } }
+    private func wheelSet(_ p: CGPoint) { let x = min(1, max(-1, p.x)); let y = min(1, max(-1, p.y)); let z = -(0.2126 * x + 0.7152 * y) / 0.0722; let v = [Double(0.25 * x), Double(0.25 * y), Double(0.25 * z)]; switch wheelName { case "gamma": model.wheels.gamma = v; case "gain": model.wheels.gain = v; case "offset": model.wheels.offset = v; default: model.wheels.lift = v } }
     private var masterBinding: Binding<Double> { Binding(get: { wheelMaster }, set: { v in let old = wheelBinding.wrappedValue; let length = sqrt(old.x * old.x + old.y * old.y); let dx = length > 1e-9 ? old.x / length : 1; let dy = length > 1e-9 ? old.y / length : 0; wheelMaster = v; wheelSet(CGPoint(x: dx * v, y: dy * v)) }) }
     private var curveBinding: Binding<[[Double]]> { Binding(get: { curveName == "master" ? model.curves.master : curveName == "r" ? model.curves.r : curveName == "g" ? model.curves.g : model.curves.b }, set: { v in if curveName == "master" { model.curves.master = v } else if curveName == "r" { model.curves.r = v } else if curveName == "g" { model.curves.g = v } else { model.curves.b = v } }) }
     private var hueBinding: Binding<[[Double]]> { Binding(get: { hueName == "sat" ? model.hue.sat : hueName == "hue" ? model.hue.hue : hueName == "lum" ? model.hue.lum : model.hue.lumsat }, set: { v in if hueName == "sat" { model.hue.sat = v } else if hueName == "hue" { model.hue.hue = v } else if hueName == "lum" { model.hue.lum = v } else { model.hue.lumsat = v } }) }
@@ -894,7 +894,7 @@ struct ColorWheel: View {
             let center = CGPoint(x: side / 2, y: side / 2)
             let radius = side * 0.44
             ZStack {
-                Circle().fill(AngularGradient(colors: [.red, .yellow, .green, .cyan, .blue, .magenta, .red], center: .center)).overlay(Circle().fill(RadialGradient(colors: [.white, .white.opacity(0)], center: .center, startRadius: 0, endRadius: radius))).frame(width: radius * 2, height: radius * 2)
+                Circle().fill(AngularGradient(colors: [.red, .yellow, .green, .cyan, .blue, Color(red: 1, green: 0, blue: 1), .red], center: .center)).overlay(Circle().fill(RadialGradient(colors: [.white, .white.opacity(0)], center: .center, startRadius: 0, endRadius: radius))).frame(width: radius * 2, height: radius * 2)
                 Circle().stroke(.white.opacity(0.6), lineWidth: 1).frame(width: radius * 2, height: radius * 2)
                 Circle().fill(.white).frame(width: 12, height: 12).overlay(Circle().stroke(.black, lineWidth: 1)).position(x: center.x + value.x * radius, y: center.y - value.y * radius)
             }.frame(width: side, height: side).contentShape(Circle()).gesture(DragGesture(minimumDistance: 0).onChanged { v in
@@ -930,7 +930,7 @@ struct CurveEditor: View {
                 path.addLine(to: CGPoint(x: size.width, y: 0)); context.stroke(path, with: .color(.white), lineWidth: 2)
                 for (i, p) in sorted.enumerated() { let xx = periodic ? p[0] / 360 : p[0]; let yy = hueBackground ? plotY(p[1]) : p[1]; let r = CGRect(x: xx * size.width - 5, y: size.height - yy * size.height - 5, width: 10, height: 10); context.fill(Path(ellipseIn: r), with: .color(selected == i ? .yellow : .white)) }
             }
-            .background { if hueBackground { AngularGradient(colors: [.red, .yellow, .green, .cyan, .blue, .magenta, .red], center: .center).opacity(0.35) } }
+            .background { if hueBackground { AngularGradient(colors: [.red, .yellow, .green, .cyan, .blue, Color(red: 1, green: 0, blue: 1), .red], center: .center).opacity(0.35) } }
             .gesture(DragGesture(minimumDistance: 0).onEnded { v in
                 let px = min(1, max(0, v.location.x / max(1, geo.size.width))); let py = min(1, max(0, 1 - v.location.y / max(1, geo.size.height)))
                 var sorted = points.sorted { $0[0] < $1[0] }
