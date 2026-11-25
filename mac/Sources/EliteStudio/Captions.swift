@@ -291,6 +291,7 @@ final class CaptionTrack: @unchecked Sendable {
         let alpha: Float
         let difference: Bool
         var dx: CGFloat = 0
+        var dy: CGFloat = 0
     }
 
     init(captions: [Caption], style: CaptionStyle, frame: CGSize) {
@@ -341,6 +342,8 @@ final class OverlayTrack: @unchecked Sendable {
         let start: Double, duration: Double
         let delay: Double, fade: Double, unit: CGFloat
         let animated: Bool
+        let animationIn: String
+        let animationOut: String
     }
     private let items: [Item]
 
@@ -354,7 +357,8 @@ final class OverlayTrack: @unchecked Sendable {
                 for (i, e) in Overlay.elements(for: card, frame: frame).enumerated() {
                     guard let b = OverlayTrack.bitmap(e.image, rect: e.rect) else { continue }
                     items.append(Item(key: "title|\(card.hashValue)|\(i)|\(frame.width)", bitmap: b, start: c.start, duration: c.duration,
-                                      delay: e.delay, fade: card.fade, unit: Overlay.unit(frame) * CGFloat(card.size), animated: true))
+                                      delay: e.delay, fade: card.fade, unit: Overlay.unit(frame) * CGFloat(card.size), animated: true,
+                                      animationIn: card.animationIn, animationOut: card.animationOut))
                 }
             }
         }
@@ -376,8 +380,20 @@ final class OverlayTrack: @unchecked Sendable {
             guard t >= it.start, t < it.start + it.duration else { return nil }
             if !it.animated { return CaptionTrack.State(key: it.key, bitmap: it.bitmap, scale: 1, alpha: 1, difference: false) }
             let a = Overlay.animation(t: t - it.start, dur: it.duration, delay: it.delay, fade: it.fade, unit: it.unit)
-            guard a.alpha > 0 else { return nil }
-            return CaptionTrack.State(key: it.key, bitmap: it.bitmap, scale: 1, alpha: Float(a.alpha), difference: false, dx: a.dx)
+            let local = t - it.start
+            let animDuration = min(0.7, max(0.05, it.fade))
+            var alpha = a.alpha
+            var dy: CGFloat = 0
+            if it.animationIn == "Dissolvenza" || it.animationIn == "Macchina da scrivere" { alpha *= min(1, max(0, local / animDuration)) }
+            if it.animationIn == "Scorri su" { let progress = min(1, max(0, local / animDuration)); dy += CGFloat(1 - progress) * it.unit * 80 }
+            if it.animationIn == "Pop/Scala" { alpha *= min(1, max(0, local / animDuration)) }
+            if it.animationOut != "Nessuna" {
+                let out = min(1, max(0, (it.start + it.duration - t) / animDuration))
+                if it.animationOut == "Dissolvenza" || it.animationOut == "Pop/Scala" { alpha *= out }
+                if it.animationOut == "Scorri su" { dy += CGFloat(1 - out) * it.unit * 80 }
+            }
+            guard alpha > 0 else { return nil }
+            return CaptionTrack.State(key: it.key, bitmap: it.bitmap, scale: 1, alpha: Float(alpha), difference: false, dx: a.dx, dy: dy)
         }
     }
 }

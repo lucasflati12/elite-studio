@@ -779,6 +779,21 @@ final class TimelineNSView: NSView {
             }
             i += 1
         }
+        for marker in editor.project.markers where marker.t >= scrollT && marker.t <= end {
+            let px = x(marker.t)
+            let hex = marker.color.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+            let value = UInt32(hex, radix: 16) ?? 0xe4ca4a
+            let color = NSColor(srgbRed: CGFloat((value >> 16) & 255) / 255,
+                                green: CGFloat((value >> 8) & 255) / 255,
+                                blue: CGFloat(value & 255) / 255, alpha: 1)
+            color.setStroke()
+            let line = NSBezierPath(); line.move(to: CGPoint(x: px, y: rulerH)); line.line(to: CGPoint(x: px, y: bounds.height - barH)); line.stroke()
+            color.setFill()
+            let triangle = NSBezierPath(); triangle.move(to: CGPoint(x: px - 5, y: 1)); triangle.line(to: CGPoint(x: px + 5, y: 1)); triangle.line(to: CGPoint(x: px, y: 9)); triangle.close(); triangle.fill()
+            if !marker.name.isEmpty {
+                (marker.name as NSString).draw(at: CGPoint(x: px + 6, y: 2), withAttributes: a)
+            }
+        }
         NSColor(white: 1, alpha: 0.15).setFill()
         CGRect(x: 0, y: rulerH - 1, width: bounds.width, height: 1).fill()
     }

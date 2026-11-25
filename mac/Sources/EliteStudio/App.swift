@@ -166,6 +166,20 @@ struct EliteStudioApp: App {
             }
             CommandMenu("Sequenza") {
                 Button("Taglia al playhead") { editor.addEdit() }.keyboardShortcut("k")
+                Button("Velocità / Durata e curve…") { editor.editSpeedAndRamp() }.keyboardShortcut("r")
+                Button("Aggiungi fermo immagine · 2 s") { editor.freezeFrame() }.keyboardShortcut("f", modifiers: [.shift])
+                Button("Aggiungi marker") { editor.addMarker() }.keyboardShortcut("m")
+                Button("Marker successivo") { editor.jumpMarker(true) }.keyboardShortcut("m", modifiers: [.shift])
+                Button("Marker precedente") { editor.jumpMarker(false) }.keyboardShortcut("m", modifiers: [.command, .shift])
+                Button("Transizioni…") { editor.addTransition() }
+                Button("Riduzione rumore (solo export Windows)") { editor.toggleNoiseReduction() }
+                Button("Disattiva audio della clip") { editor.toggleAudioDisabled() }
+                Button("Separa audio dalla clip") { editor.separateAudio() }
+                Button("Abbassa musica sotto la voce") { editor.duckMusic() }
+                Button("Seleziona clip a destra del playhead") { editor.selectRightOfPlayhead() }.keyboardShortcut("a")
+                Button("Chiudi spazi sulla traccia selezionata") { editor.closeGaps() }
+                Button("Inverti clip (prepara file cache)") { editor.status = "Inversione video tramite file intermedio non ancora disponibile su Mac" }
+                Button("Esporta fotogramma PNG…") { editor.exportFrame() }.keyboardShortcut("e", modifiers: [.command, .shift])
                 Button("Aggiungi titolo") { editor.addTitle() }.keyboardShortcut("t")
                 Button("Aggiungi testo libero") { editor.addPlainText() }
                 Button("Aggiungi traccia video/audio") { editor.addTrack() }
@@ -277,9 +291,11 @@ enum KeyHandler {
         guard let w = NSApp.keyWindow, w.attachedSheet == nil, NSApp.modalWindow == nil,
               !(w.firstResponder is NSText) else { return false }
         let flags = e.modifierFlags.intersection([.command, .control, .option, .shift])
+        if flags.contains(.command) && flags.contains(.shift) && e.charactersIgnoringModifiers?.lowercased() == "m" { Editor.shared.jumpMarker(false); return true }
         if flags.contains(.command) || flags.contains(.control) { return false }
         let ed = Editor.shared
         let shift = flags.contains(.shift)
+        if e.charactersIgnoringModifiers?.lowercased() == "m" { if shift { ed.jumpMarker(true) } else { ed.addMarker() }; return true }
         switch e.keyCode {
         case 49: ed.togglePlay(); return true                                  // space
         case 123: ed.step(frames: shift ? -5 : -1); return true                // ←
@@ -306,6 +322,9 @@ enum KeyHandler {
         case "l": ed.shuttle(1)
         case "q": ed.rippleTrim(toPlayhead: true)
         case "w": ed.rippleTrim(toPlayhead: false)
+        case "a": ed.selectRightOfPlayhead()
+        case ",": ed.nudgeSelection(-1)
+        case ".": ed.nudgeSelection(1)
         case "=", "+": ed.zoomTimeline?(1.5)
         case "-": ed.zoomTimeline?(1 / 1.5)
         case "\\": ed.fitTimeline?()

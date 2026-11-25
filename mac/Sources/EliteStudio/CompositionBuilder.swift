@@ -61,7 +61,7 @@ enum CompositionBuilder {
                let track = comp.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) {
                 var cursor: Int64 = 0
                 for c in clips {
-                    guard let m = p.media(c.mediaID), let rt = cache.runtimes[m.id], let src = rt.audio, let range = rt.audioRange else { continue }
+                    guard let m = p.media(c.mediaID), !c.audioDisabled, let rt = cache.runtimes[m.id], let src = rt.audio, let range = rt.audioRange else { continue }
                     if let seg = insert(c, src: src, available: range, into: track, cursor: &cursor, lane: lane) { aSegs.append(seg) }
                 }
                 if aSegs.contains(where: { $0.lane == lane }) { aIDs[lane] = track.trackID } else { comp.removeTrack(track) }
@@ -123,7 +123,7 @@ enum CompositionBuilder {
         let clipsByID = Dictionary(uniqueKeysWithValues: p.clips.map { ($0.id, $0) })
         let hasPano = b.video.contains { s in clipsByID[s.clipID].flatMap { p.media($0.mediaID) }.flatMap { cache.runtimes[$0.id]?.pano } != nil }
         // 360 clips and captions need the GPU compositor (the "negativo" captions read the video under them)
-        if hasPano || p.visibleCaptions != nil || p.clips.contains(where: { !$0.isTitle && $0.effects.needsGPU }) {
+        if hasPano || p.visibleCaptions != nil || p.clips.contains(where: { !$0.isTitle && ($0.effects.needsGPU || $0.crop != nil || $0.flipH || $0.flipV || $0.chromaKey != nil || $0.background != nil || $0.transition != nil) }) {
             return panoComposition(b, project: p, cache: cache, bounds: sorted, total: total, overlays: burnOverlays ? OverlayTrack(project: p) : nil)
         }
 
@@ -182,6 +182,9 @@ enum CompositionBuilder {
                 var l = CompLayer(kind: .flat, trackID: tid)
                 l.opacity = Float(c.opacity)
                 l.clip = c
+                l.clipStart = Double(seg.start) / Double(timescale)
+                l.sourceIn = c.sourceIn
+                l.speed = c.speed
                 var neutral = c; neutral.scale = 1; neutral.offsetX = 0; neutral.offsetY = 0
                 if let pano = rt.pano {
                     l.kind = .pano
@@ -192,6 +195,10 @@ enum CompositionBuilder {
                     if rt.lens2 != nil, let t2 = b.lensBTrackIDs[lane] { l.trackID2 = t2 }
                 } else {
                     l.transform = transform(for: neutral, runtime: rt, frame: frame)
+                    if c.background?.type == "blur" && !c.fill {
+                        var fillClip = neutral; fillClip.fill = true
+                        l.backgroundTransform = transform(for: fillClip, runtime: rt, frame: frame)
+                    }
                 }
                 layers.append(l)
             }

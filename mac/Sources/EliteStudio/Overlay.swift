@@ -53,8 +53,11 @@ enum Overlay {
         let y0 = CGFloat(card.y) * frame.height
         if card.style == "text" {
             let f = display(64 * k)
-            let text = NSAttributedString(string: card.names, attributes: [.font: f, .foregroundColor: NSColor.white,
-                                                                          .strokeColor: NSColor.black, .strokeWidth: -3])
+            var attrs: [NSAttributedString.Key: Any] = [.font: f, .foregroundColor: NSColor.white]
+            if card.stylePreset == "Contorno" || card.stylePreset == "Normale" { attrs[.strokeColor] = NSColor.black; attrs[.strokeWidth] = -3 }
+            if card.stylePreset == "Ombra" { let shadow = NSShadow(); shadow.shadowColor = NSColor.black; shadow.shadowBlurRadius = 8 * k; shadow.shadowOffset = CGSize(width: 3 * k, height: -3 * k); attrs[.shadow] = shadow }
+            if card.stylePreset == "Sfondo box" { attrs[.backgroundColor] = NSColor.black.withAlphaComponent(0.72) }
+            let text = NSAttributedString(string: card.names, attributes: attrs)
             let size = text.size()
             if let img = render(CGSize(width: size.width + 8 * k, height: size.height + 8 * k), { _ in text.draw(at: CGPoint(x: 4 * k, y: 4 * k)) }) {
                 out.append(Element(image: img, rect: CGRect(x: x0, y: y0, width: CGFloat(img.width), height: CGFloat(img.height)), delay: 0))

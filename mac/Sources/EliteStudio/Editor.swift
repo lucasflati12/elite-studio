@@ -3,6 +3,7 @@ import AVFoundation
 import AppKit
 import Combine
 import UniformTypeIdentifiers
+import ImageIO
 
 /// Playhead + play state, kept apart so 30 fps updates don't redraw the whole window.
 @MainActor
@@ -376,6 +377,183 @@ final class Editor: ObservableObject {
         guard !targets.isEmpty else { return }
         let t = clock.time
         edit { p in for c in targets { p.split(c.id, at: t) } }
+    }
+
+    func addMarker() {
+        let marker = TimelineMarker(t: max(0, clock.time), name: "", color: "#e4ca4a")
+        edit { p in p.markers.removeAll { abs($0.t - marker.t) < 0.03 }; p.markers.append(marker); p.markers.sort { $0.t < $1.t } }
+    }
+
+    func jumpMarker(_ forward: Bool) {
+        let list = project.markers.map(\.t).sorted()
+        guard !list.isEmpty else { return }
+        let target = forward ? list.first(where: { $0 > clock.time + 0.02 }) ?? list[0] : list.last(where: { $0 < clock.time - 0.02 }) ?? list[list.count - 1]
+        seek(target)
+    }
+
+    func editSpeedAndRamp() {
+        guard let c = project.clips.first(where: { selection.contains($0.id) && !$0.isTitle }) else { status = "Seleziona una clip"; return }
+        let alert = NSAlert(); alert.messageText = "Velocità / Durata"; alert.informativeText = "La velocità viene salvata come moltiplicatore nel progetto condiviso."
+        let box = NSStackView(); box.orientation = .vertical; box.spacing = 8; box.frame = CGRect(x: 0, y: 0, width: 260, height: 86)
+        let speed = NSSlider(value: c.speed, minValue: 0.1, maxValue: 16, target: nil, action: nil)
+        let label = NSTextField(labelWithString: speedLabel(c.speed)); speed.target = label; speed.action = #selector(NSTextField.takeFloatValueFrom(_:))
+        let preset = NSPopUpButton(frame: .zero, pullsDown: false); preset.addItems(withTitles: ["Velocità costante", "Montagna", "Bullet", "Ingresso veloce", "Uscita veloce"])
+        box.addArrangedSubview(speed); box.addArrangedSubview(label); box.addArrangedSubview(preset); alert.accessoryView = box
+        alert.addButton(withTitle: "Applica"); alert.addButton(withTitle: "Annulla")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let chosen = speed.doubleValue
+        if preset.indexOfSelectedItem == 0 { edit { $0.setSpeed(c.id, chosen) }; return }
+        let speeds: [Double]
+        switch preset.titleOfSelectedItem {
+        case "Montagna": speeds = [0.5, 2, 0.5]
+        case "Bullet": speeds = [0.5, 4, 0.5]
+        case "Ingresso veloce": speeds = [3, 1.5, 1]
+        default: speeds = [1, 1.5, 3]
+        }
+        edit { p in
+            guard let i = p.clips.firstIndex(where: { $0.id == c.id }) else { return }
+            let sourceLength = c.sourceDuration, part = sourceLength / 3
+            p.clips.remove(at: i)
+            var cursor = c.start
+            for n in 0..<3 {
+                var seg = c; seg.id = n == 0 ? c.id : newID(); seg.sourceIn = c.sourceIn + Double(n) * part
+                seg.speed = speeds[n]; seg.duration = part / speeds[n]; seg.start = cursor
+                seg.speedRamp = SpeedRamp(preset: preset.titleOfSelectedItem ?? "Montagna", segment: n, points: speeds)
+                cursor += seg.duration; p.clips.append(seg)
+            }
+        }
+    }
+
+    func toggleNoiseReduction() {
+        guard let c = project.clips.first(where: { selection.contains($0.id) }) else { return }
+        edit { p in if let i = p.clips.firstIndex(where: { $0.id == c.id }) { p.clips[i].noiseReduction.toggle() } }
+        status = "Riduzione rumore disponibile solo export Windows"
+    }
+
+    func toggleAudioDisabled() {
+        guard let c = project.clips.first(where: { selection.contains($0.id) }) else { return }
+        edit { p in if let i = p.clips.firstIndex(where: { $0.id == c.id }) { p.clips[i].audioDisabled.toggle() } }
+    }
+
+    func addTransition() {
+        guard let c = project.clips.first(where: { selection.contains($0.id) && !$0.isTitle }) else { return }
+        let a = NSAlert(); a.messageText = "Transizione"; a.addButton(withTitle: "Applica"); a.addButton(withTitle: "Annulla")
+        let menu = NSPopUpButton(frame: .zero, pullsDown: false)
+        menu.addItems(withTitles: ["Dissolvenza al nero", "Scorrimento sinistra", "Scorrimento destra", "Scorrimento su", "Scorrimento giù", "Zoom", "Wipe", "Sfocatura"])
+        let seconds = NSTextField(string: "0.5"); seconds.placeholderString = "Durata (s)"
+        let box = NSStackView(views: [menu, seconds]); box.orientation = .vertical; box.spacing = 8; a.accessoryView = box
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        let duration = max(0.05, Double(seconds.stringValue) ?? 0.5)
+        edit { p in if let i = p.clips.firstIndex(where: { $0.id == c.id }) { p.clips[i].transition = ClipTransition(type: menu.titleOfSelectedItem ?? "Dissolvenza al nero", duration: duration) } }
+    }
+
+    func separateAudio() {
+        guard let c = project.clips.first(where: { selection.contains($0.id) && !$0.isTitle }),
+              let source = project.media(c.mediaID), source.hasAudio else { status = "La clip selezionata non contiene audio"; return }
+        edit { p in
+            var audio = source; audio.id = newID(); audio.hasVideo = false; audio.pano = false
+            p.media.append(audio)
+            var detached = c; detached.id = newID(); detached.mediaID = audio.id; detached.track = min(1, p.tracks.audioMuted.count - 1)
+            detached.audioDetached = true; detached.audioDisabled = false
+            if let index = p.clips.firstIndex(where: { $0.id == c.id }) { p.clips[index].audioDisabled = true }
+            p.clips.append(detached)
+        }
+    }
+
+    func selectRightOfPlayhead() {
+        selection = Set(project.clips.filter { $0.start >= clock.time - 1e-6 }.map(\.id)); gap = nil
+    }
+
+    func nudgeSelection(_ direction: Int) {
+        guard !selection.isEmpty else { return }
+        let amount = Double(direction) / Double(max(1, project.settings.fps))
+        edit { p in for i in p.clips.indices where selection.contains(p.clips[i].id) { p.clips[i].start = max(0, p.clips[i].start + amount) } }
+    }
+
+    func closeGaps() {
+        let lane = project.clips.first(where: { selection.contains($0.id) })?.track ?? TrackIndex.main
+        edit { p in
+            var cursor = 0.0
+            for i in p.clips.indices.filter({ p.clips[$0].track == lane }).sorted(by: { p.clips[$0].start < p.clips[$1].start }) {
+                if p.clips[i].start > cursor { p.clips[i].start = cursor }
+                cursor = max(cursor, p.clips[i].end)
+            }
+        }
+    }
+
+    func duckMusic() {
+        let target = project.clips.first(where: { selection.contains($0.id) })?.track ?? TrackIndex.main
+        let voice = project.clips.filter { $0.track != target && !$0.isTitle && !$0.audioDisabled && project.media($0.mediaID)?.hasAudio == true }
+        let music = project.clips.filter { $0.track == target && !$0.isTitle && project.media($0.mediaID)?.hasAudio == true }
+        guard !voice.isEmpty, !music.isEmpty else { status = "Servono una traccia voce e una musica su tracce diverse"; return }
+        edit { p in
+            for i in p.clips.indices where p.clips[i].track == target && !p.clips[i].isTitle {
+                let c = p.clips[i]
+                guard let values = cache.peaks[p.media(c.mediaID)?.id ?? ""] else { continue }
+                let stride = max(20, Int(c.duration * 100 / 800)); var keys: [MotionKey] = []
+                for sample in Swift.stride(from: 0, to: min(values.count, Int(c.duration * 100)), by: stride) {
+                    let local = Double(sample) / 100; let timeline = c.start + local
+                    let active = voice.contains { v in
+                        guard v.start <= timeline && timeline < v.end, let peaks = cache.peaks[p.media(v.mediaID)?.id ?? ""] else { return false }
+                        let sourceIndex = Int((v.sourceIn + (timeline - v.start) * v.speed) * 100)
+                        return sourceIndex >= 0 && sourceIndex < peaks.count && peaks[sourceIndex] > 0.08
+                    }
+                    var key = MotionKey(); key.t = c.sourceIn + local * c.speed; key.volume = c.volume * (active ? 0.28 : 1); keys.append(key)
+                }
+                p.clips[i].effects.keys = keys
+            }
+        }
+    }
+
+    func freezeFrame() {
+        guard let c = project.clips.first(where: { selection.contains($0.id) && !$0.isTitle }),
+              let media = project.media(c.mediaID), let runtime = cache.runtimes[media.id] else { status = "Seleziona una clip video caricata"; return }
+        let sourceTime = min(max(0, c.sourceTime(at: clock.time)), max(0, media.duration - 0.01))
+        let generator = AVAssetImageGenerator(asset: runtime.asset); generator.appliesPreferredTrackTransform = true
+        do {
+            let cg = try generator.copyCGImage(at: CMTime(seconds: sourceTime, preferredTimescale: 600), actualTime: nil)
+            let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("EliteStudio/Freeze", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            let url = dir.appendingPathComponent("freeze-\(UUID().uuidString).png")
+            guard let dest = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil) else { throw NSError(domain: "EliteStudio", code: 40) }
+            CGImageDestinationAddImage(dest, cg, nil); guard CGImageDestinationFinalize(dest) else { throw NSError(domain: "EliteStudio", code: 41) }
+            Task { @MainActor in
+                do {
+                    var still = try await cache.probe(url); still.still = true; still.hasAudio = false
+                    _ = await cache.prepare(still)
+                    let at = clock.time
+                    checkpoint()
+                    project.media.append(still)
+                    let crossing = project.clips.filter { $0.start + 0.001 < at && $0.end - 0.001 > at }.map(\.id)
+                    for id in crossing { _ = project.split(id, at: at) }
+                    for i in project.clips.indices where project.clips[i].start >= at - 0.0001 { project.clips[i].start += 2 }
+                    for i in project.captions.indices {
+                        let cap = project.captions[i]
+                        if cap.start >= at - 0.0001 { project.captions[i].start += 2; project.captions[i].end += 2 }
+                        else if cap.end > at { project.captions[i].end += 2 }
+                    }
+                    let clip = Clip(mediaID: still.id, track: c.track, start: at, duration: 2)
+                    var frozen = clip; frozen.freezeFrame = true; frozen.freezeSource = FreezeSource(media: media.id, time: sourceTime)
+                    project.clips.append(frozen); selection = [frozen.id]
+                    status = "Fermo immagine inserito (2 s)"
+                } catch { status = "Fermo immagine non riuscito: \(error.localizedDescription)" }
+            }
+        } catch { status = "Fotogramma non disponibile: \(error.localizedDescription)" }
+    }
+
+    func exportFrame() {
+        guard let c = project.clips.first(where: { selection.contains($0.id) && !$0.isTitle }),
+              let media = project.media(c.mediaID), let runtime = cache.runtimes[media.id] else { status = "Seleziona una clip video"; return }
+        let panel = NSSavePanel(); panel.allowedContentTypes = [UTType.png]; panel.nameFieldStringValue = "Fotogramma.png"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let generator = AVAssetImageGenerator(asset: runtime.asset); generator.appliesPreferredTrackTransform = true
+            let sourceTime = max(0, c.sourceTime(at: clock.time))
+            let image = try generator.copyCGImage(at: CMTime(seconds: sourceTime, preferredTimescale: 600), actualTime: nil)
+            guard let dest = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil) else { throw NSError(domain: "EliteStudio", code: 42) }
+            CGImageDestinationAddImage(dest, image, nil); guard CGImageDestinationFinalize(dest) else { throw NSError(domain: "EliteStudio", code: 43) }
+            status = "Fotogramma esportato"
+        } catch { status = "Esportazione fotogramma non riuscita: \(error.localizedDescription)" }
     }
 
     func razor(_ id: ID, at t: Double, allTracks: Bool) {

@@ -444,12 +444,37 @@ struct ClipInspector: View {
             }
             if m?.hasAudio ?? false {
                 header("AUDIO")
-                ValueSlider(title: "Volume", value: motionBind(\.volume, base: \.volume), range: 0...2) { "\(Int(($0 * 100).rounded()))%" }
+                ValueSlider(title: "Volume", value: motionBind(\.volume, base: \.volume), range: 0...4) { $0 == 0 ? "−∞ dB" : String(format: "%+.1f dB", 20 * log10($0)) }
                 Button("Regola automaticamente il volume") { editor.normalizeAudio(id) }
+                Toggle("Riduzione rumore (solo export Windows)", isOn: Binding(get: { c.noiseReduction }, set: { value in editor.edit { p in if let i = p.clips.firstIndex(where: { $0.id == id }) { p.clips[i].noiseReduction = value } }; editor.status = "Riduzione rumore disponibile solo export Windows" }))
+                Toggle("Disattiva audio incorporato", isOn: bind(\.audioDisabled))
             }
             if m?.pano ?? false {
                 PanoInspector(editor: editor, clock: editor.clock, id: id)
                 ValueSlider(title: "Opacità", value: motionBind(\.opacity, base: \.opacity), range: 0...1) { "\(Int(($0 * 100).rounded()))%" }
+                header("TRASFORMA")
+                ForEach(["left", "right", "top", "bottom"], id: \.self) { side in
+                    ValueSlider(title: "Ritaglio \(side)", value: Binding(get: { cropValue(c.crop, side) }, set: { value in editor.edit("crop.\(id).\(side)") { p in
+                        guard let i = p.clips.firstIndex(where: { $0.id == id }) else { return }
+                        var crop = p.clips[i].crop ?? Crop()
+                        setCropValue(&crop, side, min(0.85, max(0, value))); p.clips[i].crop = crop
+                    } }), range: 0...0.85) { "\(Int(($0 * 100).rounded()))%" }
+                }
+                Toggle("Specchia orizzontalmente", isOn: bind(\.flipH))
+                Toggle("Specchia verticalmente", isOn: bind(\.flipV))
+                Toggle("Sfondo sfocato", isOn: Binding(get: { c.background != nil }, set: { value in editor.edit { p in
+                    guard let i = p.clips.firstIndex(where: { $0.id == id }) else { return }
+                    p.clips[i].background = value ? ClipBackground(type: "blur", amount: 12) : nil
+                } }))
+                Toggle("Chroma key", isOn: Binding(get: { c.chromaKey != nil }, set: { value in editor.edit { p in
+                    guard let i = p.clips.firstIndex(where: { $0.id == id }) else { return }
+                    p.clips[i].chromaKey = value ? ChromaKey() : nil
+                } }))
+                if let key = c.chromaKey {
+                    TextField("Colore esadecimale", text: Binding(get: { key.color }, set: { value in editor.edit { p in if let i = p.clips.firstIndex(where: { $0.id == id }) { p.clips[i].chromaKey?.color = value } } }))
+                    ValueSlider(title: "Tolleranza", value: Binding(get: { key.tolerance }, set: { value in editor.edit { p in if let i = p.clips.firstIndex(where: { $0.id == id }) { p.clips[i].chromaKey?.tolerance = value } } }), range: 0.001...0.5)
+                    ValueSlider(title: "Morbidezza", value: Binding(get: { key.softness }, set: { value in editor.edit { p in if let i = p.clips.firstIndex(where: { $0.id == id }) { p.clips[i].chromaKey?.softness = value } } }), range: 0.001...0.5)
+                }
             } else if m?.hasVideo ?? false {
                 header("VIDEO")
                 Picker("", selection: bind(\.fill)) {
@@ -473,6 +498,14 @@ struct ClipInspector: View {
             EffectsInspector(editor: editor, id: id)
         }
     }
+
+    private func cropValue(_ crop: Crop?, _ side: String) -> Double {
+        let value = crop ?? Crop()
+        switch side { case "left": return value.left; case "right": return value.right; case "top": return value.top; default: return value.bottom }
+    }
+    private func setCropValue(_ crop: inout Crop, _ side: String, _ value: Double) {
+        switch side { case "left": crop.left = value; case "right": crop.right = value; case "top": crop.top = value; default: crop.bottom = value }
+    }
 }
 
 struct TitleInspector: View {
@@ -491,6 +524,9 @@ struct TitleInspector: View {
         if editor.project.clips.contains(where: { $0.id == id }) {
             header("TITOLO")
             Picker("Tipo", selection: bind(\.style)) { Text("Cartellino").tag("card"); Text("Testo libero").tag("text") }
+            Picker("Animazione entrata", selection: bind(\.animationIn)) { ForEach(["Nessuna", "Dissolvenza", "Scorri su", "Pop/Scala", "Macchina da scrivere"], id: \.self) { Text($0).tag($0) } }
+            Picker("Animazione uscita", selection: bind(\.animationOut)) { ForEach(["Nessuna", "Dissolvenza", "Scorri su", "Pop/Scala"], id: \.self) { Text($0).tag($0) } }
+            Picker("Stile", selection: bind(\.stylePreset)) { ForEach(["Normale", "Contorno", "Ombra", "Sfondo box"], id: \.self) { Text($0).tag($0) } }
             Text("Nomi (uno per riga)").font(.system(size: 11)).foregroundStyle(.secondary)
             TextEditor(text: bind(\.names))
                 .font(.system(size: 13, weight: .semibold))

@@ -32,7 +32,19 @@ struct TitleCard: Hashable {
     var y = 1330.0 / 1920.0                      // top of the name box, fraction of frame height
     var size = 1.0
     var fade = 0.4
+    var animationIn = "Nessuna"
+    var animationOut = "Nessuna"
+    var stylePreset = "Normale"
 }
+
+struct TimelineMarker: Codable, Hashable { var t = 0.0; var name = ""; var color = "#e4ca4a" }
+struct Crop: Codable, Hashable { var left = 0.0; var right = 0.0; var top = 0.0; var bottom = 0.0 }
+struct ClipBackground: Codable, Hashable { var type = "blur"; var amount = 12.0 }
+struct ClipTransition: Codable, Hashable { var type = "Dissolvenza al nero"; var duration = 0.5 }
+struct ChromaKey: Codable, Hashable { var color = "#00ff00"; var tolerance = 0.12; var softness = 0.08 }
+struct SpeedRamp: Codable, Hashable { var preset = "Montagna"; var segment = 0; var points: [Double] = [1, 1, 1] }
+struct FreezeSource: Codable, Hashable { var media: String; var time: Double }
+struct ReverseSource: Codable, Hashable { var media: String; var `in`: Double; var duration: Double }
 
 /// Track: 0 = V1/A1 (main), 1 = V2/A2 (overlay), 2 = titles.
 enum TrackIndex {
@@ -56,6 +68,21 @@ struct Clip: Identifiable, Hashable {
     var offsetX = 0.0             // fraction of frame
     var offsetY = 0.0
     var speed = 1.0               // 2 = twice as fast (the clip covers twice as much of the file)
+    var pitch = true
+    var speedRamp: SpeedRamp?
+    var freezeFrame = false
+    var freezeSource: FreezeSource?
+    var reversed = false
+    var reverseSource: ReverseSource?
+    var crop: Crop?
+    var flipH = false
+    var flipV = false
+    var background: ClipBackground?
+    var transition: ClipTransition?
+    var noiseReduction = false
+    var chromaKey: ChromaKey?
+    var audioDisabled = false
+    var audioDetached = false
     var reframe: Reframe?         // 360 clips: where the virtual camera looks (nil = defaults)
     var effects = ClipEffects()
 
@@ -90,6 +117,7 @@ struct Project: Hashable {
     var tracks = TrackState()
     var captions: [Caption] = []          // automatic subtitles, timeline seconds (see Captions.swift)
     var captionStyle = CaptionStyle()
+    var markers: [TimelineMarker] = []
     var lanes: [Int] { Array(0..<max(2, tracks.videoHidden.count)).filter { $0 != 2 } }
     static func trackNumber(_ lane: Int) -> Int { lane < 2 ? lane + 1 : lane }
 
@@ -143,6 +171,7 @@ enum ProjectFile {
         p.tracks = raw.tracks ?? TrackState()
         p.captions = (raw.captions ?? []).filter { $0.end > $0.start }.sorted { $0.start < $1.start }
         p.captionStyle = raw.captionStyle ?? CaptionStyle()
+        p.markers = (raw.markers ?? []).map { var m = $0; m.t = max(0, m.t); return m }.sorted { $0.t < $1.t }
         var byPath: [String: ID] = [:]
         for m in raw.media ?? [] {
             let url = resolve(m.path, base: base)
@@ -195,6 +224,13 @@ enum ProjectFile {
             c.offsetY = rc.y ?? 0
             c.reframe = rc.pano
             c.effects = rc.effects ?? ClipEffects()
+            c.pitch = rc.pitch ?? true; c.speedRamp = rc.speedRamp
+            c.freezeFrame = rc.freezeFrame ?? false; c.freezeSource = rc.freezeSource
+            c.reversed = rc.reversed ?? false; c.reverseSource = rc.reverseSource
+            c.crop = rc.crop; c.flipH = rc.flipH ?? false; c.flipV = rc.flipV ?? false
+            c.background = rc.background; c.transition = rc.transition
+            c.noiseReduction = rc.noiseReduction ?? false; c.chromaKey = rc.chromaKey
+            c.audioDisabled = rc.audioDisabled ?? false; c.audioDetached = rc.audioDetached ?? false
             p.clips.append(c)          // duration 0 = "to the end of the file", filled in after probing
             trackEnd[c.track] = c.end
         }
@@ -211,6 +247,7 @@ enum ProjectFile {
         raw.tracks = p.tracks
         if !p.captions.isEmpty { raw.captions = p.captions.sorted { $0.start < $1.start } }
         raw.captionStyle = p.captionStyle
+        if !p.markers.isEmpty { raw.markers = p.markers.sorted { $0.t < $1.t } }
         raw.media = p.media.map {
             RawMedia(id: $0.id, path: relative($0.url, base: base), name: $0.name, duration: round3($0.duration),
                      hasVideo: $0.hasVideo, hasAudio: $0.hasAudio, width: $0.width, height: $0.height, still: $0.still ? true : nil,
@@ -233,6 +270,13 @@ enum ProjectFile {
             if c.offsetY != 0 { r.y = c.offsetY }
             if c.speed != 1 { r.speed = c.speed }
             r.pano = c.reframe
+            r.pitch = c.pitch == false ? false : nil; r.speedRamp = c.speedRamp
+            r.freezeFrame = c.freezeFrame ? true : nil; r.freezeSource = c.freezeSource
+            r.reversed = c.reversed ? true : nil; r.reverseSource = c.reverseSource
+            r.crop = c.crop; r.flipH = c.flipH ? true : nil; r.flipV = c.flipV ? true : nil
+            r.background = c.background; r.transition = c.transition
+            r.noiseReduction = c.noiseReduction ? true : nil; r.chromaKey = c.chromaKey
+            r.audioDisabled = c.audioDisabled ? true : nil; r.audioDetached = c.audioDetached ? true : nil
             if c.effects != ClipEffects() { r.effects = c.effects }
             return r
         }
@@ -266,6 +310,7 @@ private struct RawProject: Codable {
     var clips: [RawClip]?
     var captions: [Caption]?
     var captionStyle: CaptionStyle?
+    var markers: [TimelineMarker]?
 }
 
 private struct RawMedia: Codable {
@@ -299,10 +344,14 @@ private struct RawClip: Codable {
     var speed: Double?
     var pano: Reframe?
     var effects: ClipEffects?
+    var pitch: Bool?; var speedRamp: SpeedRamp?; var freezeFrame: Bool?; var freezeSource: FreezeSource?
+    var reversed: Bool?; var reverseSource: ReverseSource?; var crop: Crop?; var flipH: Bool?; var flipV: Bool?
+    var background: ClipBackground?; var transition: ClipTransition?; var noiseReduction: Bool?; var chromaKey: ChromaKey?
+    var audioDisabled: Bool?; var audioDetached: Bool?
 }
 
 extension TitleCard: Codable {
-    enum K: String, CodingKey { case names, label, showLabel, tag, x, y, size, fade, style }
+    enum K: String, CodingKey { case names, label, showLabel, tag, x, y, size, fade, style, animationIn, animationOut, stylePreset }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)
         let def = TitleCard()
@@ -311,6 +360,7 @@ extension TitleCard: Codable {
         if let arr = try? c.decode([String].self, forKey: .names) { names = arr.joined(separator: "\n") } else { names = c.get(.names, def.names) }
         label = c.get(.label, def.label); showLabel = c.get(.showLabel, def.showLabel); tag = c.get(.tag, def.tag)
         x = c.get(.x, def.x); y = c.get(.y, def.y); size = c.get(.size, def.size); fade = c.get(.fade, def.fade)
+        animationIn = c.get(.animationIn, "Nessuna"); animationOut = c.get(.animationOut, "Nessuna"); stylePreset = c.get(.stylePreset, "Normale")
     }
     func encode(to e: Encoder) throws {
         var c = e.container(keyedBy: K.self)
@@ -318,6 +368,9 @@ extension TitleCard: Codable {
         try c.encode(tag, forKey: .tag); try c.encode(x, forKey: .x); try c.encode(y, forKey: .y)
         try c.encode(size, forKey: .size); try c.encode(fade, forKey: .fade)
         try c.encode(style, forKey: .style)
+        if animationIn != "Nessuna" { try c.encode(animationIn, forKey: .animationIn) }
+        if animationOut != "Nessuna" { try c.encode(animationOut, forKey: .animationOut) }
+        if stylePreset != "Normale" { try c.encode(stylePreset, forKey: .stylePreset) }
     }
 }
 

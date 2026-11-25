@@ -15,6 +15,7 @@ struct CompLayer {
     var trackID: CMPersistentTrackID
     var trackID2: CMPersistentTrackID = kCMPersistentTrackID_Invalid   // second lens of a two-file 360 clip
     var transform = CGAffineTransform.identity                          // source px -> frame px (flat)
+    var backgroundTransform = CGAffineTransform.identity
     var opacity: Float = 1
     var clip: Clip?
     // 360
@@ -104,6 +105,12 @@ final class GPU: @unchecked Sendable {
 
     static let shared = GPU()
 
+    static func parseColor(_ value: String) -> SIMD3<Float> {
+        let text = value.hasPrefix("#") ? String(value.dropFirst()) : value
+        guard text.count == 6, let raw = UInt32(text, radix: 16) else { return SIMD3<Float>(0, 1, 0) }
+        return SIMD3<Float>(Float((raw >> 16) & 255) / 255, Float((raw >> 8) & 255) / 255, Float(raw & 255) / 255)
+    }
+
     let device: MTLDevice
     let queue: MTLCommandQueue
     let flat: MTLComputePipelineState
@@ -177,11 +184,34 @@ final class GPU: @unchecked Sendable {
             if l.kind == .flat {
                 guard let lut = lutTexture(e.grade) else { enc.endEncoding(); return false }
                 let inv = l.transform.concatenating(placement).inverted()
+                let fillInv = l.backgroundTransform.concatenating(placement).inverted()
+                let localTime = max(0, time - l.clipStart)
+                let transition = l.clip?.transition
+                let transitionProgress = transition == nil ? 1.0 : min(1.0, localTime / max(0.05, transition!.duration))
+                let key = l.clip?.chromaKey
+                let keyColor = GPU.parseColor(key?.color ?? "#00ff00")
+                let transitionCode: Float
+                switch transition?.type {
+                case "Scorrimento sinistra": transitionCode = 1
+                case "Scorrimento destra": transitionCode = 2
+                case "Scorrimento su": transitionCode = 3
+                case "Scorrimento giù": transitionCode = 4
+                case "Zoom": transitionCode = 5
+                case "Wipe": transitionCode = 6
+                case "Sfocatura": transitionCode = 7
+                case "Dissolvenza al nero": transitionCode = 8
+                default: transitionCode = 0
+                }
                 var u: [SIMD4<Float>] = [
                     SIMD4(Float(inv.a), Float(inv.b), Float(inv.c), Float(inv.d)),
                     SIMD4(Float(inv.tx), Float(inv.ty), Float(src.width), Float(src.height)),
-                    SIMD4(l.opacity, 0, 0, 0),
+                    SIMD4(l.opacity, Float(transitionProgress), Float(l.clip?.crop?.left ?? 0), Float(l.clip?.crop?.right ?? 0)),
                     SIMD4(Float(e.exposure), Float(e.contrast), Float(e.saturation), Float(e.temperature)),
+                    SIMD4(Float(l.clip?.crop?.top ?? 0), Float(l.clip?.crop?.bottom ?? 0), l.clip?.flipH == true ? 1 : 0, l.clip?.flipV == true ? 1 : 0),
+                    SIMD4(keyColor.x, keyColor.y, keyColor.z, key == nil ? 0 : 1),
+                    SIMD4(Float(key?.tolerance ?? 0.12), Float(key?.softness ?? 0.08), transitionCode, Float(localTime)),
+                    SIMD4(Float(fillInv.a), Float(fillInv.b), Float(fillInv.c), Float(fillInv.d)),
+                    SIMD4(Float(fillInv.tx), Float(fillInv.ty), Float(l.clip?.background?.amount ?? 0), l.kind == .flat && l.clip?.background != nil && l.clip?.fill == false ? 1 : 0),
                 ]
                 enc.setComputePipelineState(flat)
                 enc.setTexture(src, index: 0); enc.setTexture(acc, index: 1); enc.setTexture(lut, index: 2)
@@ -212,7 +242,7 @@ final class GPU: @unchecked Sendable {
         if let o = ins.overlays { stamps += o.states(at: time) }
         for st in stamps {
             guard let tex = captionTexture(st) else { continue }
-            let r = st.bitmap.rect.offsetBy(dx: st.dx, dy: 0)
+            let r = st.bitmap.rect.offsetBy(dx: st.dx, dy: st.dy)
             var u: [SIMD4<Float>] = [
                 SIMD4(Float(r.minX), Float(r.minY), Float(r.width), Float(r.height)),
                 SIMD4(st.scale, st.alpha, st.difference ? 1 : 0, 0),
@@ -356,18 +386,59 @@ final class GPU: @unchecked Sendable {
         outT.write(half4(acc.read(g).rgb, 1), g);
     }
 
-    // u[0] = inverse transform a b c d, u[1] = tx ty srcW srcH, u[2].x = opacity
+    // u[0] = inverse transform, u[1] = translation/source size, u[2] = opacity/transition/crop LR,
+    // u[3] = grade, u[4] = crop TB/flip HV, u[5] = key RGB/enabled, u[6] = key params/transition/time.
     kernel void flatLayer(texture2d<float, access::sample> src [[texture(0)]], texture2d<half, access::read_write> acc [[texture(1)]],
                           texture3d<float, access::read> lut [[texture(2)]], constant float4 *u [[buffer(0)]], uint2 g [[thread_position_in_grid]]) {
         if (g.x >= acc.get_width() || g.y >= acc.get_height()) return;
         float2 p = float2(g) + 0.5;
         float2 s = float2(u[0].x * p.x + u[0].z * p.y + u[1].x, u[0].y * p.x + u[0].w * p.y + u[1].y);
-        if (s.x < 0 || s.y < 0 || s.x > u[1].z || s.y > u[1].w) return;
+        float2 frameUV = float2(g) / float2(acc.get_width(), acc.get_height());
+        float progress = clamp(u[2].y, 0.0, 1.0);
+        int transition = int(u[6].z + 0.5);
+        if (transition == 1) s.x -= (1.0 - progress) * u[1].z;
+        else if (transition == 2) s.x += (1.0 - progress) * u[1].z;
+        else if (transition == 3) s.y += (1.0 - progress) * u[1].w;
+        else if (transition == 4) s.y -= (1.0 - progress) * u[1].w;
+        else if (transition == 5) { s = (s - float2(u[1].z, u[1].w) * 0.5) / max(0.05, progress) + float2(u[1].z, u[1].w) * 0.5; }
+        if (transition == 6 && frameUV.x > progress) return;
+        bool foregroundValid = !(s.x < 0 || s.y < 0 || s.x > u[1].z || s.y > u[1].w);
+        float2 uv = s / float2(u[1].z, u[1].w);
+        float2 lo = float2(u[2].z, u[4].x);
+        float2 hi = float2(1.0 - u[2].w, 1.0 - u[4].y);
+        foregroundValid = foregroundValid && !any(uv < lo) && !any(uv > hi) && !any(hi <= lo);
+        uv = (uv - lo) / (hi - lo);
+        if (u[4].z > 0.5) uv.x = 1.0 - uv.x;
+        if (u[4].w > 0.5) uv.y = 1.0 - uv.y;
+        s = uv * float2(u[1].z, u[1].w);
         constexpr sampler smp(coord::pixel, filter::linear, address::clamp_to_edge);
-        float4 c = src.sample(smp, s);
-        half4 d = acc.read(g);
-        // source alpha counts (ProRes 4444 overlays on V2); normal video has alpha 1
-        acc.write(half4(half3(mix(float3(d.rgb), grade(lut3(lut, c.rgb), u[3]), u[2].x * c.a)), 1.0h), g);
+        if (u[8].w > 0.5) {
+            float2 bg = float2(u[7].x * p.x + u[7].z * p.y + u[8].x,
+                               u[7].y * p.x + u[7].w * p.y + u[8].y);
+            float radius = clamp(u[8].z * u[1].z / float(acc.get_width()), 0.0, 80.0);
+            float4 b0 = src.sample(smp, bg);
+            float4 b1 = src.sample(smp, bg + float2(radius, 0));
+            float4 b2 = src.sample(smp, bg - float2(radius, 0));
+            float4 b3 = src.sample(smp, bg + float2(0, radius));
+            float4 b4 = src.sample(smp, bg - float2(0, radius));
+            float3 blurred = (b0.rgb * 0.4 + (b1.rgb + b2.rgb + b3.rgb + b4.rgb) * 0.15);
+            half4 prior = acc.read(g);
+            acc.write(half4(half3(mix(float3(prior.rgb), blurred, u[2].x)), 1.0h), g);
+        }
+        if (foregroundValid) {
+            float4 c = src.sample(smp, s);
+            if (u[5].w > 0.5) {
+                float distanceToKey = distance(c.rgb, u[5].rgb);
+                float alphaKey = smoothstep(u[6].x, u[6].x + max(0.001, u[6].y), distanceToKey);
+                c.a *= alphaKey;
+            }
+            float transitionAlpha = 1.0;
+            if (transition == 8 || transition == 5 || transition == 6 || transition == 7) transitionAlpha = progress;
+            if (transition == 7) transitionAlpha = smoothstep(0.0, 1.0, progress);
+            half4 d = acc.read(g);
+            // source alpha counts (ProRes 4444 overlays on V2); normal video has alpha 1
+            acc.write(half4(half3(mix(float3(d.rgb), grade(lut3(lut, c.rgb), u[3]), u[2].x * c.a * transitionAlpha)), 1.0h), g);
+        }
     }
 
     // Caption on top of the picture. u[0] = rect x y w h (frame px), u[1] = scale, alpha, mode (1 = difference / "negativo")
