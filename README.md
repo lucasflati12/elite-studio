@@ -15,6 +15,8 @@ A lightweight video editor I built for my own reels — and the workflow where a
 
 Features: two video lanes (V1/V2), audio levels, automatic captions, title overlays, basic colour grading with a shared 3D LUT, Insta360 360° reframing (Mac), and a command line to check/export projects without opening the UI.
 
+Round 3a Windows adds timeline markers, speed and duration controls with ramp segments, freeze frames, reverse clips, crop/flip and blurred canvas backgrounds. Shared JSON fields are documented in [`docs/FORMATO-MONTAGGIO.md`](docs/FORMATO-MONTAGGIO.md).
+
 ## Mac — quick start
 
 **Insta360 360° on a Mac:** download the ready-to-use folder (app + Italian guide) [Insta360-360-su-Mac.zip](https://github.com/lucasflati12/elite-studio/releases/latest/download/Insta360-360-su-Mac.zip) — guide: [`mac/GUIDA-360-INSTA360.md`](mac/GUIDA-360-INSTA360.md).

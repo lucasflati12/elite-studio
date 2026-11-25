@@ -15,3 +15,4 @@ node_modules/
 __pycache__/
 *.pyc
 windows/Windows/.test-appdata*/
+.test-appdata-r3a*/

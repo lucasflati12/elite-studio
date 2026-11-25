@@ -86,6 +86,7 @@ def gui(initial=None):
                 if self.clip_rect(c).contains(position) or (m and m.get('hasAudio') and self.clip_rect(c,True).contains(position)): return c
             return None
         def time_at(self,x): return max(0,(x-self.left)/self.zoom)
+        def keyPressEvent(self,event): self.editor.keyPressEvent(event)
         def paintEvent(self,event):
             import numpy as np
             from PySide6.QtCore import QLineF
@@ -165,8 +166,10 @@ def gui(initial=None):
             if self.drag and self.drag[0]=='box':
                 p.setPen(QPen(QColor('#e4ca4a'),1)); p.setBrush(QColor(228,202,74,35)); p.drawRect(QRectF(self.drag[1],self.drag[2]).normalized())
             for marker in self.editor.project.data.get('markers',[]):
-                mx=self.left+marker['time']*self.zoom
-                p.fillRect(QRectF(mx-2,self.top-3,4,3),QColor('#e4ca4a'))
+                mx=self.left+marker.get('t',marker.get('time',0))*self.zoom
+                p.setPen(QPen(QColor(marker.get('color','#e4ca4a')),1)); p.drawLine(QPointF(mx,self.top-5),QPointF(mx,self.height()))
+                p.setBrush(QColor(marker.get('color','#e4ca4a'))); p.drawPolygon(QPolygonF([QPointF(mx-5,2),QPointF(mx+5,2),QPointF(mx,9)]))
+                if marker.get('name'): p.drawText(int(mx+4),self.top-7,marker['name'][:24])
             x=self.left+self.editor.position*self.zoom
             p.setPen(QPen(QColor('#f03d47'),1)); p.drawLine(QPointF(x,12),QPointF(x,self.height()))
             p.setBrush(QColor('#f03d47')); p.drawPolygon(QPolygonF([QPointF(x-5,4),QPointF(x+5,4),QPointF(x+5,12),QPointF(x,18),QPointF(x-5,12)]))
@@ -218,6 +221,13 @@ def gui(initial=None):
                     clips=sorted((c for c in self.editor.project.clips if c['track']==lane),key=lambda c:c['start'])
                     nxt=next((c['start'] for c in clips if c['start']>t),None); prev=max([c['start']+c['duration'] for c in clips if c['start']+c['duration']<=t] or [0])
                     if nxt is not None: self.editor.gap=(lane,prev,nxt)
+        def mouseDoubleClickEvent(self,event):
+            if event.button()==Qt.MouseButton.LeftButton and event.position().y()<=self.top:
+                t=self.time_at(event.position().x()); markers=self.editor.project.data.get('markers',[])
+                marker=min(markers,key=lambda m:abs(m.get('t',m.get('time',0))-t),default=None)
+                if marker and abs(marker.get('t',marker.get('time',0))-t)<=8/self.zoom:self.editor.edit_marker(marker); return
+                self.editor.seek(t); self.editor.add_marker(); return
+            super().mouseDoubleClickEvent(event)
         def mouseMoveEvent(self,event):
             pos=event.position()
             if not self.drag:
@@ -424,6 +434,10 @@ def gui(initial=None):
             self.name.setText('Titolo' if c and 'title' in c else m['name'] if m else 'Seleziona una clip')
             for k,field in self.fields.items():
                 field.setEnabled(c is not None); field.setValue(float(c.get(k,1 if k in ['speed','volume','scale','opacity'] else 0)) if c else 0)
+            for k,field in self.transform_fields.items():
+                field.setEnabled(c is not None); field.setValue(float(c.get('crop',{}).get(k,0)) if c else 0)
+            for key,box in [('flipH',self.flip_h),('flipV',self.flip_v),('backgroundBlur',self.background_blur)]:
+                box.setEnabled(c is not None); box.setChecked(bool(c.get('flipH' if key=='flipH' else 'flipV',False) if c and key!='backgroundBlur' else c and c.get('background',{}).get('type')=='blur') if c else False)
             labels=[self.project.track_label(i) for i in range(max(3,len(self.project.data['tracks']['videoHidden']))) ]
             if self.track.count()!=len(labels): self.track.clear(); self.track.addItems(labels)
             self.track.setEnabled(c is not None); self.track.setCurrentIndex(c['track'] if c else 0); self.fill.setChecked(c.get('fill',False) if c else False)
@@ -504,8 +518,13 @@ def gui(initial=None):
         def set_property(self,key):
             c=self.selected_clip()
             if self.updating or not c: return
-            value=self.fields[key].value()
+            value=self.transform_fields[key[5:]].value() if key.startswith('crop_') else self.fields[key].value()
             from effects import at
+            if key.startswith('crop_'):
+                field=key[5:]; previous=c.get('crop',{}).get(field,0); value=max(0,min(.45,value))
+                if value+ c.get('crop',{}).get({'left':'right','right':'left','top':'bottom','bottom':'top'}[field],0)>.85: value=.85-c.get('crop',{}).get({'left':'right','right':'left','top':'bottom','bottom':'top'}[field],0)
+                if abs(float(previous)-value)<.00001:return
+                self.checkpoint(); c.setdefault('crop',{})[field]=value; self.changed(); return
             previous=at(c,self.position-c['start']).get(key,c.get(key,1 if key in ['speed','volume','opacity','scale'] else 0))
             if abs(float(previous)-value)<.00001: return
             self.checkpoint()
@@ -529,6 +548,15 @@ def gui(initial=None):
             c=self.selected_clip()
             if self.updating or not c: return
             self.checkpoint(); c['fill']=value; self.changed()
+        def set_clip_flag(self,key,value):
+            c=self.selected_clip()
+            if self.updating or not c:return
+            self.checkpoint()
+            if key=='backgroundBlur':
+                if value:c['background']={'type':'blur','amount':12}
+                else:c.pop('background',None)
+            else:c[key]=value
+            self.changed()
         def set_title(self):
             c=self.selected_clip()
             if self.updating or not c or 'title' not in c: return
@@ -885,10 +913,21 @@ def gui(initial=None):
                     if image is None: warning=True; continue
                     from effects import color,at,envelope
                     motion=at(c,self.position-c['start'])
+                    crop=c.get('crop',{}); l,r,t,b=(max(0,min(.45,float(crop.get(k,0)))) for k in ('left','right','top','bottom'))
+                    if l+r or t+b:image=image.crop((round(image.width*l),round(image.height*t),max(1,round(image.width*(1-r))),max(1,round(image.height*(1-b)))))
+                    if c.get('flipH'):image=image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+                    if c.get('flipV'):image=image.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
                     iw,ih=image.size; factor=(max if c.get('fill') else min)(w/iw,h/ih)
                     iw,ih=max(1,round(iw*factor)),max(1,round(ih*factor)); image=image.resize((iw,ih),Image.Resampling.BILINEAR)
                     image=color(image,c.get('effects',{}))
-                    surface=Image.new('RGBA',(w,h)); surface.alpha_composite(image,(round((w-iw)/2),round((h-ih)/2)))
+                    if c.get('background',{}).get('type')=='blur' and not c.get('fill'):
+                        from PIL import ImageFilter
+                        bgfactor=max(w/iw,h/ih); bw,bh=max(w,round(iw*bgfactor)),max(h,round(ih*bgfactor)); bg=image.resize((bw,bh),Image.Resampling.BILINEAR)
+                        blur_scale=min(w/w0,h/h0)
+                        bg=bg.crop(((bw-w)//2,(bh-h)//2,(bw+w)//2,(bh+h)//2)).filter(ImageFilter.BoxBlur(radius=max(1,min(50,float(c['background'].get('amount',12))*blur_scale))))
+                        surface=bg.convert('RGBA')
+                    else:surface=Image.new('RGBA',(w,h))
+                    surface.alpha_composite(image,(round((w-iw)/2),round((h-ih)/2)))
                     sw,sh=max(1,round(w*motion['scale'])),max(1,round(h*motion['scale']))
                     image=surface.resize((sw,sh),Image.Resampling.BILINEAR)
                     if motion['rotation']: image=image.rotate(-motion['rotation'],resample=Image.Resampling.BILINEAR,expand=True); sw,sh=image.size
@@ -917,7 +956,11 @@ def gui(initial=None):
         def keyPressEvent(self,event):
             if isinstance(QApplication.focusWidget(),(QLineEdit,QTextEdit,QAbstractSpinBox)): super().keyPressEvent(event); return
             key=event.key(); shift=bool(event.modifiers()&Qt.KeyboardModifier.ShiftModifier)
-            if key==Qt.Key.Key_Space: self.toggle()
+            if key==Qt.Key.Key_M and shift: self.marker_step(-1 if event.modifiers()&Qt.KeyboardModifier.ControlModifier else 1)
+            elif key==Qt.Key.Key_M: self.add_marker()
+            elif key==Qt.Key.Key_R and event.modifiers()&Qt.KeyboardModifier.ControlModifier: self.speed_dialog()
+            elif key==Qt.Key.Key_F and shift: self.freeze_frame()
+            elif key==Qt.Key.Key_Space: self.toggle()
             elif key==Qt.Key.Key_K: self.pause()
             elif key==Qt.Key.Key_L: self.shuttle(1)
             elif key==Qt.Key.Key_J: self.shuttle(-1)
@@ -928,7 +971,8 @@ def gui(initial=None):
             elif key==Qt.Key.Key_Escape: self.select(None)
             elif key==Qt.Key.Key_Left: self.pause(); self.seek(self.position-(5 if shift else 1)/self.project.settings['fps'])
             elif key==Qt.Key.Key_Right: self.pause(); self.seek(self.position+(5 if shift else 1)/self.project.settings['fps'])
-            elif key in [Qt.Key.Key_Delete,Qt.Key.Key_Backspace]: self.delete(shift)
+            elif key in [Qt.Key.Key_Delete,Qt.Key.Key_Backspace]:
+                if not self.delete_marker():self.delete(shift)
             elif key==Qt.Key.Key_C and not (event.modifiers() & (Qt.KeyboardModifier.ControlModifier|Qt.KeyboardModifier.MetaModifier)): self.choose_tool(True)
             elif key==Qt.Key.Key_V and not (event.modifiers() & (Qt.KeyboardModifier.ControlModifier|Qt.KeyboardModifier.MetaModifier)): self.razor=False; self.choose_tool(False)
             elif key==Qt.Key.Key_S: self.snap_box.setChecked(not self.snap_box.isChecked())
@@ -940,6 +984,102 @@ def gui(initial=None):
                 candidates=[t for t in points if t<self.position-.001] if key==Qt.Key.Key_Up else [t for t in points if t>self.position+.001]
                 if candidates: self.pause(); self.seek(candidates[-1] if key==Qt.Key.Key_Up else candidates[0])
             else: super().keyPressEvent(event)
+
+        def add_marker(self):
+            self.checkpoint(); markers=self.project.data.setdefault('markers',[])
+            markers.append(dict(t=round(self.position*self.project.settings['fps'])/self.project.settings['fps'],name='',color='#e4ca4a'))
+            self.changed()
+        def edit_marker(self,marker):
+            from PySide6.QtWidgets import QInputDialog,QColorDialog,QMenu
+            from PySide6.QtGui import QCursor
+            menu=QMenu(self); rename=menu.addAction('Rinomina'); color=menu.addAction('Colore…'); delete=menu.addAction('Elimina'); chosen=menu.exec(QCursor.pos())
+            if chosen is delete:
+                self.checkpoint(); self.project.data['markers'].remove(marker); self.changed(); return
+            if chosen is rename:
+                name,ok=QInputDialog.getText(self,'Marker','Nome',text=marker.get('name',''))
+                if ok:self.checkpoint(); marker['name']=name; self.changed()
+            if chosen is color:
+                value=QColorDialog.getColor(QColor(marker.get('color','#e4ca4a')),self,'Colore marker')
+                if value.isValid():self.checkpoint(); marker['color']=value.name(); self.changed()
+        def delete_marker(self):
+            markers=self.project.data.get('markers',[])
+            marker=min(markers,key=lambda m:abs(m.get('t',m.get('time',0))-self.position),default=None)
+            if marker and abs(marker.get('t',marker.get('time',0))-self.position)<=1/self.project.settings['fps']:
+                self.checkpoint(); markers.remove(marker); self.changed(); return True
+            return False
+        def marker_step(self,direction):
+            markers=sorted(self.project.data.get('markers',[]),key=lambda m:m.get('t',m.get('time',0)))
+            if not markers:return
+            t=self.position; times=[m.get('t',m.get('time',0)) for m in markers]
+            target=next((x for x in (times if direction>0 else reversed(times)) if x>t+.001),None) if direction>0 else next((x for x in reversed(times) if x<t-.001),None)
+            if target is not None:self.seek(target)
+        def speed_dialog(self):
+            from PySide6.QtWidgets import QDialog,QFormLayout,QDoubleSpinBox,QCheckBox,QComboBox,QDialogButtonBox,QLabel
+            c=self.selected_clip()
+            if not c:return
+            dialog=QDialog(self); dialog.setWindowTitle('Velocità / Durata'); form=QFormLayout(dialog)
+            speed=QDoubleSpinBox(); speed.setRange(10,1600); speed.setValue(c.get('speed',1)*100); speed.setSuffix(' %'); form.addRow('Velocità',speed)
+            duration=QLabel(f'{c["duration"]:.3f} s'); form.addRow('Nuova durata',duration)
+            source_length=c['duration']*c.get('speed',1)
+            speed.valueChanged.connect(lambda value:duration.setText(f'{source_length/(value/100):.3f} s'))
+            keep=QCheckBox('Mantieni intonazione'); keep.setChecked(True); form.addRow(keep)
+            ripple=QCheckBox('Sposta le clip successive'); ripple.setChecked(True); form.addRow(ripple)
+            preset=QComboBox(); preset.addItems(['Costante','Montagna','Bullet','Ingresso veloce','Uscita veloce']); form.addRow('Curva',preset)
+            buttons=QDialogButtonBox(QDialogButtonBox.StandardButton.Ok|QDialogButtonBox.StandardButton.Cancel); form.addRow(buttons); buttons.accepted.connect(dialog.accept); buttons.rejected.connect(dialog.reject)
+            if dialog.exec()!=QDialog.DialogCode.Accepted:return
+            value=speed.value()/100
+            self.checkpoint()
+            selected=preset.currentText()
+            if selected!='Costante':
+                from editing import apply_speed_ramp
+                segments=apply_speed_ramp(self.project,c,value,selected,ripple=ripple.isChecked())
+                for part in segments:part['pitch']=keep.isChecked()
+            else:
+                from editing import change_speed
+                change_speed(self.project,c,value,ripple=ripple.isChecked()); c['pitch']=keep.isChecked(); c.pop('speedRamp',None)
+            self.changed()
+        def freeze_frame(self):
+            c=next((v for v in self.project.clips if v['start']<=self.position<v['start']+v['duration'] and self.project.item(v) and self.project.item(v).get('hasVideo')),None)
+            if not c:return
+            from core import tool,CREATE_FLAGS,probe,uid
+            import hashlib
+            from storage import fingerprint
+            m=self.project.item(c); source_t=c.get('in',0)+(self.position-c['start'])*c.get('speed',1)
+            cache=Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'EliteStudioWindows'/'freeze'; cache.mkdir(parents=True,exist_ok=True)
+            png=cache/(hashlib.sha1(f'{fingerprint(m["path"])}:{source_t:.5f}'.encode()).hexdigest()+'.png')
+            if not png.exists():
+                result=__import__('subprocess').run([tool('ffmpeg'),'-v','error','-y','-ss',f'{source_t:.6f}','-i',m['path'],'-frames:v','1',str(png)],capture_output=True,creationflags=CREATE_FLAGS)
+                if result.returncode: self.error(result.stderr.decode(errors='replace')[-1200:]); return
+            self.checkpoint()
+            for crossing in list(self.project.clips):
+                if crossing['start']+.001<self.position<crossing['start']+crossing['duration']-.001:self.project.split(crossing['id'],self.position)
+            for later in self.project.clips:
+                if later['start']>=self.position-.0001:later['start']+=2
+            from captions import retime
+            for cap in self.project.data.get('captions',[]):
+                if cap['start']>=self.position-.0001:retime(cap,cap['start']+2,cap['end']+2)
+                elif cap['end']>self.position:retime(cap,cap['start'],cap['end']+2)
+            still=probe(png); still.update(id=uid(),path=str(png),duration=2,still=True,hasAudio=False); self.project.media.append(still)
+            self.project.add_clip(still['id'],c['track'],self.position); frozen=self.project.clips[-1]; frozen['duration']=2; frozen['freezeFrame']=True; frozen['freezeSource']={'media':m['id'],'time':source_t}; self.changed()
+        def reverse_clip(self):
+            c=self.selected_clip()
+            if not c or not self.project.item(c) or not self.project.item(c).get('hasVideo'):return
+            from core import tool,CREATE_FLAGS,probe,uid
+            import hashlib,subprocess
+            from storage import fingerprint
+            m=self.project.item(c); span=c['duration']*c.get('speed',1)
+            key=hashlib.sha1(f'{fingerprint(m["path"])}:{c.get("in",0):.6f}:{span:.6f}'.encode()).hexdigest()
+            cache=Path(os.environ.get('LOCALAPPDATA',str(Path.home())))/'EliteStudioWindows'/'reverse'; cache.mkdir(parents=True,exist_ok=True)
+            target=cache/(key+'.mp4')
+            if not target.exists():
+                command=[tool('ffmpeg'),'-v','error','-y','-ss',f'{c.get("in",0):.6f}','-t',f'{span:.6f}','-i',m['path'],'-vf','reverse']
+                if m.get('hasAudio'):command+=['-af','areverse']
+                command+=['-threads','2','-c:v','libx264','-preset','ultrafast','-pix_fmt','yuv420p']
+                if m.get('hasAudio'):command+=['-c:a','aac']
+                command.append(str(target)); result=subprocess.run(command,capture_output=True,creationflags=CREATE_FLAGS)
+                if result.returncode:self.error(result.stderr.decode(errors='replace')[-1500:]);return
+            self.checkpoint(); reversed_media=probe(target); reversed_media.update(id=uid(),path=str(target),reversed=True); self.project.media.append(reversed_media)
+            c.update(media=reversed_media['id'],**{'in':0},reversed=True,reverseSource={'media':m['id'],'in':c.get('in',0),'duration':span}); self.changed()
         def resizeEvent(self,event):
             super().resizeEvent(event)
             if hasattr(self,'timeline'): QTimer.singleShot(0,self.render_preview)

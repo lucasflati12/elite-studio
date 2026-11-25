@@ -28,6 +28,15 @@ Ctrl+S salva il progetto. Ctrl+E esporta un video MP4.
 
 FUNZIONI PRINCIPALI
 
+- M aggiunge un marker al cursore; Shift+M/Ctrl+Shift+M passa al marker
+  successivo/precedente. Doppio clic sul righello per rinominare o colorare;
+  Canc elimina un marker sul cursore.
+- Ctrl+R apre Velocità / Durata: velocità, ripple e curve Montagna, Bullet,
+  Ingresso veloce e Uscita veloce. Shift+F inserisce un fermo immagine di 2 s.
+  Sequenza > Inverti clip crea/riusa un intermedio invertito nella cache.
+- Nella scheda Clip, Trasforma regola ritaglio, specchio e sfondo sfocato.
+  Lo schema JSON condiviso è documentato in docs/FORMATO-MONTAGGIO.md.
+
 - Sequenza > Aggiungi traccia video/audio aggiunge tracce fino a otto.
 - L'ispettore ha le schede Clip, Effetti e Sottotitoli.
 - Effetti: colore, rotazione, dissolvenze video/audio e volume automatico.

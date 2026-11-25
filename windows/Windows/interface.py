@@ -167,6 +167,8 @@ def build_ui(editor,Viewer,Bin,Timeline):
     for name,fn,key in [('Annulla',e.undo,'Ctrl+Z'),('Ripeti',e.redo,'Ctrl+Shift+Z'),('Copia',e.copy_clip,'Ctrl+C'),('Incolla',e.paste_clip,'Ctrl+V'),('Seleziona tutto',e.select_all,'Ctrl+A')]: action(name,fn,key,edit)
     view=e.menuBar().addMenu('Vista'); action('Adatta timeline',e.fit,'\\',view)
     sequence_menu=e.menuBar().addMenu('Sequenza'); action('Taglia al cursore',e.cut,'Ctrl+K',sequence_menu); action('Aggiungi titolo',e.add_title,'Ctrl+T',sequence_menu)
+    action('Velocità / Durata…',e.speed_dialog,'Ctrl+R',sequence_menu); action('Inverti clip',e.reverse_clip,None,sequence_menu)
+    action('Aggiungi marker al cursore · M',e.add_marker,None,sequence_menu); action('Fermo immagine · Shift+F',e.freeze_frame,'Shift+F',sequence_menu)
     action('Elimina e chiudi',lambda:e.delete(True),None,sequence_menu)
     action('Rifila inizio fino al cursore · Q',lambda:e.ripple_trim(True),None,sequence_menu)
     action('Rifila fine dal cursore · W',lambda:e.ripple_trim(False),None,sequence_menu)
@@ -285,6 +287,13 @@ def build_ui(editor,Viewer,Bin,Timeline):
     for key,label,lo,hi,step in [('start','Inizio',0,86400,.1),('in','Sorgente',0,86400,.1),('duration','Durata',.01,86400,.1),('opacity','Opacità',0,1,.05),('scale','Scala',.05,8,.05),('x','Posizione X',-2,2,.01),('y','Posizione Y',-2,2,.01)]: af.addRow(label,spin(key,lo,hi,step))
     e.track=QComboBox(); e.track.addItems(['V1 / A1','V2 / A2','Titoli']); e.track.activated.connect(e.set_track); af.addRow('Traccia',e.track)
     e.fill=QCheckBox('Riempi fotogramma'); e.fill.toggled.connect(e.set_fill); af.addRow(e.fill); advanced.hide(); advanced_toggle.toggled.connect(advanced.setVisible); cp.addWidget(advanced)
+    transform=QWidget(); tr=QFormLayout(transform); tr.setContentsMargins(0,0,0,0); e.transform_fields={}
+    for key,label in [('left','Ritaglio sinistra'),('right','Ritaglio destra'),('top','Ritaglio alto'),('bottom','Ritaglio basso')]:
+        field=QDoubleSpinBox(); field.setRange(0,.45); field.setSingleStep(.01); field.setDecimals(2); field.editingFinished.connect(lambda k='crop_'+key:e.set_property(k)); e.transform_fields[key]=field; tr.addRow(label,field)
+    flags=QHBoxLayout(); e.flip_h=QCheckBox('Specchia H'); e.flip_h.toggled.connect(lambda v:e.set_clip_flag('flipH',v)); flags.addWidget(e.flip_h)
+    e.flip_v=QCheckBox('Specchia V'); e.flip_v.toggled.connect(lambda v:e.set_clip_flag('flipV',v)); flags.addWidget(e.flip_v); tr.addRow(flags)
+    e.background_blur=QCheckBox('Sfondo sfocato'); e.background_blur.toggled.connect(lambda v:e.set_clip_flag('backgroundBlur',v)); tr.addRow(e.background_blur)
+    cp.addWidget(section('TRASFORMA')); cp.addWidget(transform)
     il.removeWidget(e.sequence_panel)
     from PySide6.QtWidgets import QTabWidget
     e.inspector_tabs=QTabWidget(); il.addWidget(e.inspector_tabs)

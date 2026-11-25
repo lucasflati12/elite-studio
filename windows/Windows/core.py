@@ -68,6 +68,7 @@ class Project:
         self.missing = []
         from captions import DEFAULT_STYLE
         self.data.update(captions=[],captionStyle=copy.deepcopy(DEFAULT_STYLE))
+        self.data['markers']=[]
         self.data['tracks']['captionsHidden']=False
 
     @property
@@ -172,6 +173,15 @@ class Project:
                 else:
                     c['duration'] = max(0, (by_id[c['media']].get('duration', 0) - c['in']) / c['speed'])
             c['duration'] = max(0, float(c['duration']))
+            crop=c.get('crop',{})
+            if crop and (not isinstance(crop,dict) or any(k not in ('left','right','top','bottom') or not math.isfinite(float(v)) or not 0<=float(v)<=.85 for k,v in crop.items())):
+                raise ValueError(f'Invalid crop in clip {c["id"]}')
+            crop={k:float(crop.get(k,0)) for k in ('left','right','top','bottom')}
+            if crop['left']+crop['right']>.85 or crop['top']+crop['bottom']>.85: raise ValueError(f'Invalid crop in clip {c["id"]}')
+            if any(crop.values()):c['crop']=crop
+            background=c.get('background')
+            if background is not None and (not isinstance(background,dict) or background.get('type')!='blur' or not math.isfinite(float(background.get('amount',12))) or not 0<float(background.get('amount',12))<=50):
+                raise ValueError(f'Invalid background in clip {c["id"]}')
             from effects import validate
             validate(c.get('effects',{}))
             for key in ['in', 'speed', 'start', 'duration', 'volume', 'opacity', 'scale', 'x', 'y']:
@@ -187,6 +197,10 @@ class Project:
                 if not Path(m['proxyPath']).is_file() or (source.is_file() and m.get('proxyFingerprint') and fingerprint(source)!=m['proxyFingerprint']):
                     m.pop('proxyPath',None); m.pop('proxyFingerprint',None)
         p.data['media'], p.data['clips'] = media, clips
+        marker_data=raw.get('markers',[])
+        if not isinstance(marker_data,list):raise ValueError('Invalid markers: expected an array')
+        p.data['markers']=[dict(t=max(0,float(m.get('t',m.get('time',0)))),name=str(m.get('name','')),color=str(m.get('color','#e4ca4a'))) for m in marker_data if isinstance(m,dict)]
+        if any(not math.isfinite(marker['t']) for marker in p.data['markers']):raise ValueError('Invalid marker time')
         p.ensure_tracks()
         from captions import normalize,DEFAULT_STYLE
         p.data['captions']=normalize(p.data.get('captions',[]))
@@ -378,15 +392,29 @@ def _export(project, output, progress=lambda value: None, cancel=None, hevc=Fals
                     # Fit/fill to a sequence-sized transparent surface before scale/position.
                     fill=c.get('fill',False)
                     mode='increase' if fill else 'decrease'
-                    chain+=f',scale={w}:{h}:force_original_aspect_ratio={mode}'
-                    chain+=f',crop={w}:{h}' if fill else f',pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black@0'
+                    crop=c.get('crop',{})
+                    l,r,t,b=(max(0,min(.45,float(crop.get(k,0)))) for k in ('left','right','top','bottom'))
+                    if l+r or t+b: chain+=f",crop=iw*{1-l-r:.8f}:ih*{1-t-b:.8f}:iw*{l:.8f}:ih*{t:.8f}"
+                    if c.get('flipH'): chain+=',hflip'
+                    if c.get('flipV'): chain+=',vflip'
+                    bg=c.get('background',{})
+                    if bg.get('type')=='blur' and not fill:
+                        graph.append(chain+f",split[fg{index}][bg{index}]")
+                        graph.append(f'[bg{index}]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},boxblur={max(1,min(50,float(bg.get("amount",12))))}[blur{index}]')
+                        graph.append(f'[fg{index}]scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black@0[fit{index}]')
+                        graph.append(f'[blur{index}][fit{index}]overlay=(W-w)/2:(H-h)/2[canvas{index}]')
+                        chain=f'[canvas{index}]'
+                    else:
+                        chain+=f',scale={w}:{h}:force_original_aspect_ratio={mode}'
+                        chain+=f',crop={w}:{h}' if fill else f',pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=black@0'
                     from effects import video_filters
-                    chain+=','+video_filters({**c,'_renderFPS':fps},w,h)
+                    filters=video_filters({**c,'_renderFPS':fps},w,h)
+                    if filters: chain+=('' if chain.endswith(']') else ',')+filters
                 else:
                     fade=max(0,min(float(title.get('fade',.4)),c['duration']/2))
                     if fade:
                         chain+=f',fade=t=in:st=0:d={fade}:alpha=1,fade=t=out:st={c["duration"]-fade}:d={fade}:alpha=1'
-                chain+=f',setpts=PTS+{c["start"]}/TB[v{index}]'
+                chain+=('' if chain.endswith(']') else ',')+f'setpts=PTS+{c["start"]}/TB[v{index}]'
                 graph.append(chain)
                 from effects import expression
                 local_time=f't-{c["start"]}'
@@ -399,7 +427,8 @@ def _export(project, output, progress=lambda value: None, cancel=None, hevc=Fals
             if m and m.get('hasAudio') and not tracks.get('audioMuted',[False,False])[track]:
                 delay=round(c['start']*1000)
                 from effects import audio_filters
-                graph.append(f'[{index}:a]asetpts=PTS-STARTPTS,{atempo(speed)},atrim=duration={c["duration"]},{audio_filters(c)},aresample=48000,aformat=channel_layouts=stereo,adelay={delay}|{delay},apad,atrim=duration={duration}[a{index}]')
+                time_filter=atempo(speed) if c.get('pitch',True) else f'aresample=48000,asetrate=48000*{speed},aresample=48000'
+                graph.append(f'[{index}:a]asetpts=PTS-STARTPTS,{time_filter},atrim=duration={c["duration"]},{audio_filters(c)},aresample=48000,aformat=channel_layouts=stereo,adelay={delay}|{delay},apad,atrim=duration={duration}[a{index}]')
                 audio.append(f'[a{index}]')
             index+=1
         graph.append(''.join(audio)+f'amix=inputs={len(audio)}:duration=first:dropout_transition=0,volume={len(audio)},alimiter=limit=0.95[audio]')
