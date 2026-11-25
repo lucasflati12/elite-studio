@@ -171,6 +171,7 @@ struct EliteStudioApp: App {
                 Button("Aggiungi marker") { editor.addMarker() }.keyboardShortcut("m", modifiers: [])
                 Button("Marker successivo") { editor.jumpMarker(true) }.keyboardShortcut("m", modifiers: [.shift])
                 Button("Marker precedente") { editor.jumpMarker(false) }.keyboardShortcut("m", modifiers: [.command, .shift])
+                Button("Modifica o elimina marker vicino al playhead…") { editor.editMarkerAtPlayhead() }
                 Button("Transizioni…") { editor.addTransition() }
                 Button("Riduzione rumore (solo export Windows)") { editor.toggleNoiseReduction() }
                 Button("Disattiva audio della clip") { editor.toggleAudioDisabled() }

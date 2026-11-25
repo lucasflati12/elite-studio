@@ -486,6 +486,27 @@ struct ClipInspector: View {
                 ValueSlider(title: "Posizione X", value: motionBind(\.x, base: \.offsetX), range: -0.5...0.5)
                 ValueSlider(title: "Posizione Y", value: motionBind(\.y, base: \.offsetY), range: -0.5...0.5)
                 ValueSlider(title: "Opacità", value: motionBind(\.opacity, base: \.opacity), range: 0...1) { "\(Int(($0 * 100).rounded()))%" }
+                header("TRASFORMA")
+                ForEach(["left", "right", "top", "bottom"], id: \.self) { side in
+                    ValueSlider(title: "Ritaglio \(side)", value: Binding(get: { cropValue(c.crop, side) }, set: { value in editor.edit("crop.\(id).\(side)") { p in
+                        guard let i = p.clips.firstIndex(where: { $0.id == id }) else { return }
+                        var crop = p.clips[i].crop ?? Crop(); setCropValue(&crop, side, min(0.85, max(0, value))); p.clips[i].crop = crop
+                    } }), range: 0...0.85) { "\(Int(($0 * 100).rounded()))%" }
+                }
+                Toggle("Specchia orizzontalmente", isOn: bind(\.flipH)); Toggle("Specchia verticalmente", isOn: bind(\.flipV))
+                Toggle("Sfondo sfocato", isOn: Binding(get: { c.background != nil }, set: { value in editor.edit { p in
+                    guard let i = p.clips.firstIndex(where: { $0.id == id }) else { return }
+                    p.clips[i].background = value ? ClipBackground(type: "blur", amount: 12) : nil
+                } }))
+                Toggle("Chroma key", isOn: Binding(get: { c.chromaKey != nil }, set: { value in editor.edit { p in
+                    guard let i = p.clips.firstIndex(where: { $0.id == id }) else { return }
+                    p.clips[i].chromaKey = value ? ChromaKey() : nil
+                } }))
+                if let key = c.chromaKey {
+                    TextField("Colore esadecimale", text: Binding(get: { key.color }, set: { value in editor.edit { p in if let i = p.clips.firstIndex(where: { $0.id == id }) { p.clips[i].chromaKey?.color = value } } }))
+                    ValueSlider(title: "Tolleranza", value: Binding(get: { key.tolerance }, set: { value in editor.edit { p in if let i = p.clips.firstIndex(where: { $0.id == id }) { p.clips[i].chromaKey?.tolerance = value } } }), range: 0.001...0.5)
+                    ValueSlider(title: "Morbidezza", value: Binding(get: { key.softness }, set: { value in editor.edit { p in if let i = p.clips.firstIndex(where: { $0.id == id }) { p.clips[i].chromaKey?.softness = value } } }), range: 0.001...0.5)
+                }
                 Button("Reimposta") {
                     editor.edit { p in
                         if let i = p.clips.firstIndex(where: { $0.id == id }) {

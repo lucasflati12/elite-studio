@@ -391,6 +391,24 @@ final class Editor: ObservableObject {
         seek(target)
     }
 
+    func editMarkerAtPlayhead() {
+        guard let index = project.markers.indices.min(by: { abs(project.markers[$0].t - clock.time) < abs(project.markers[$1].t - clock.time) }),
+              abs(project.markers[index].t - clock.time) < 0.5 else { status = "Nessun marker vicino al playhead"; return }
+        var marker = project.markers[index]
+        let name = NSTextField(string: marker.name); name.placeholderString = "Nome marker"
+        let color = NSTextField(string: marker.color); color.placeholderString = "#e4ca4a"
+        let box = NSStackView(views: [name, color]); box.orientation = .vertical; box.spacing = 8
+        let alert = NSAlert(); alert.messageText = "Modifica marker"; alert.accessoryView = box
+        alert.addButton(withTitle: "Salva"); alert.addButton(withTitle: "Elimina"); alert.addButton(withTitle: "Annulla")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            marker.name = name.stringValue; marker.color = color.stringValue
+            edit { p in p.markers[index] = marker }
+        case .alertSecondButtonReturn: edit { $0.markers.remove(at: index) }
+        default: break
+        }
+    }
+
     func editSpeedAndRamp() {
         guard let c = project.clips.first(where: { selection.contains($0.id) && !$0.isTitle }) else { status = "Seleziona una clip"; return }
         let alert = NSAlert(); alert.messageText = "Velocità / Durata"; alert.informativeText = "La velocità viene salvata come moltiplicatore nel progetto condiviso."
@@ -495,8 +513,10 @@ final class Editor: ObservableObject {
                 let c = p.clips[i]
                 guard let values = cache.peaks[p.media(c.mediaID)?.id ?? ""] else { continue }
                 let stride = max(20, Int(c.duration * 100 / 800)); var keys: [MotionKey] = []
-                for sample in Swift.stride(from: 0, to: min(values.count, Int(c.duration * 100)), by: stride) {
-                    let local = Double(sample) / 100; let timeline = c.start + local
+                let sourceStart = max(0, Int(c.sourceIn * 100))
+                let sourceEnd = min(values.count, Int((c.sourceIn + c.sourceDuration) * 100))
+                for sample in Swift.stride(from: sourceStart, to: sourceEnd, by: stride) {
+                    let local = Double(sample) / 100 - c.sourceIn; let timeline = c.start + local / c.speed
                     let active = voice.contains { v in
                         guard v.start <= timeline && timeline < v.end, let peaks = cache.peaks[p.media(v.mediaID)?.id ?? ""] else { return false }
                         let sourceIndex = Int((v.sourceIn + (timeline - v.start) * v.speed) * 100)
