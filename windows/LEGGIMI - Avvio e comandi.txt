@@ -97,3 +97,5 @@ Runtime, cache, cronologia e log: %LOCALAPPDATA%\EliteStudioWindows
 Il programma funziona senza connessione dopo l'installazione e il download
 del modello vocale. Dettagli tecnici e verifiche sono nei file README.md,
 Windows/README.md e VERIFICHE.md.
+
+Round 2 colore: introdotti curve monotone, curve hue e import LUT .cube nella pipeline LUT condivisa; la finestra include strumenti ruota/curva, bypass anteprima, scopes e azioni preset/applica/copia. Per i dettagli e le limitazioni consultare CODEX_REPORT.md.

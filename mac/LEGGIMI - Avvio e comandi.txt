@@ -52,3 +52,5 @@ DOCUMENTAZIONE
 
 DOCUMENTAZIONE TECNICA.md descrive formato JSON e comandi Mac.
 VERIFICHE.md riporta i controlli svolti e quelli che richiedono ancora un Mac.
+
+Round 2 colore: aggiunti i controlli Bianchi, Neri e Vividezza nella pagina Colore macOS. La parità dei controlli avanzati resta in corso; consultare CODEX_REPORT.md.

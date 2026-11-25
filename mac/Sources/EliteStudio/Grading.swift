@@ -592,7 +592,10 @@ struct GradingView: View {
                 GradeSlider(title: "Contrasto", value: $model.basic.contrast, range: 0...2) { model.apply() }
                 GradeSlider(title: "Luci", value: $model.basic.highlights, range: -1...1) { model.apply() }
                 GradeSlider(title: "Ombre", value: $model.basic.shadows, range: -1...1) { model.apply() }
+                GradeSlider(title: "Bianchi", value: $model.basic.whites, range: -1...1) { model.apply() }
+                GradeSlider(title: "Neri", value: $model.basic.blacks, range: -1...1) { model.apply() }
                 GradeSlider(title: "Saturazione", value: $model.basic.saturation, range: 0...2) { model.apply() }
+                GradeSlider(title: "Vividezza", value: $model.basic.vibrance, range: -1...1) { model.apply() }
                 Button("Applica di nuovo / rianalizza") { model.start(force: true) }
                 Button("Esporta LUT .cube (DaVinci)…") { model.exportCube() }
                 Button("Rimuovi grading") { model.remove() }

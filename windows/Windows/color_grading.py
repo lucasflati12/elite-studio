@@ -1,15 +1,19 @@
 """Colour grading window: analyses the clips, applies a look straight away, before/after compare."""
 from __future__ import annotations
 import copy
+import json
+import os
 import shutil
 import threading
 from pathlib import Path
 
 from PIL import Image
-from PySide6.QtCore import Qt, QObject, QSize, Signal, QRectF
-from PySide6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPen, QPixmap
+from PIL import ImageDraw
+from PySide6.QtCore import Qt, QObject, QSize, Signal, QRectF, QPointF
+from PySide6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPen, QPixmap, QPainterPath
 from PySide6.QtWidgets import (QCheckBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem,
-                               QPushButton, QSlider, QVBoxLayout, QWidget)
+                               QPushButton, QSlider, QVBoxLayout, QWidget, QComboBox, QInputDialog, QTabWidget, QScrollArea)
+from PySide6.QtGui import QShortcut, QKeySequence
 
 import grading
 
@@ -59,6 +63,44 @@ class Compare(QWidget):
             p.fillRect(box, QColor(0, 0, 0, 150)); p.setPen(QColor('#f2f2f2')); p.drawText(box, Qt.AlignmentFlag.AlignCenter, text)
 
 
+class Wheel(QWidget):
+    """Compact chroma puck; drag maps to a luma-neutral RGB balance."""
+    began=Signal(); moved=Signal(float,float); reset=Signal()
+    def __init__(self): super().__init__(); self.setFixedSize(104,104); self.xy=(0.,0.); self.drag=False
+    def mousePressEvent(self,e):
+        if e.button()==Qt.MouseButton.LeftButton:
+            self.drag=True; self.began.emit(); self.mouseMoveEvent(e)
+    def mouseMoveEvent(self,e):
+        if self.drag:
+            r=QRectF(8,8,self.width()-16,self.height()-16); x=(e.position().x()-r.center().x())/(r.width()/2); y=(r.center().y()-e.position().y())/(r.height()/2); d=max(1,(x*x+y*y)**.5); self.xy=(x/d*min(1,d),y/d*min(1,d)); self.moved.emit(*self.xy); self.update()
+    def mouseReleaseEvent(self,e): self.drag=False
+    def mouseDoubleClickEvent(self,e): self.xy=(0,0); self.reset.emit(); self.update()
+    def paintEvent(self,e):
+        p=QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing); r=QRectF(8,8,self.width()-16,self.height()-16); p.setBrush(QColor('#182431')); p.setPen(QPen(QColor('#9aa9b5'),1)); p.drawEllipse(r); p.drawLine(QPointF(r.center().x(),r.top()),QPointF(r.center().x(),r.bottom())); p.drawLine(QPointF(r.left(),r.center().y()),QPointF(r.right(),r.center().y())); p.setBrush(QColor('#e4ca4a')); p.drawEllipse(QPointF(r.center().x()+self.xy[0]*r.width()/2,r.center().y()-self.xy[1]*r.height()/2),5,5)
+
+
+class CurveEditor(QWidget):
+    changed=Signal(object)
+    def __init__(self): super().__init__(); self.setMinimumSize(220,150); self.points=[]; self.selected=-1
+    def pos(self,e): return ((e.position().x()-8)/(self.width()-16),1-(e.position().y()-8)/(self.height()-16))
+    def mousePressEvent(self,e):
+        x,y=self.pos(e); self.selected=min(range(len(self.points)),key=lambda i:(self.points[i][0]-x)**2+(self.points[i][1]-y)**2) if self.points else -1
+        if self.selected<0 or sum((self.points[self.selected][0]-x)**2+(self.points[self.selected][1]-y)**2 for _ in [0])>.0025:
+            self.points.append([x,y]); self.selected=len(self.points)-1; self.points.sort(); self.changed.emit(self.points)
+        self.update()
+    def mouseMoveEvent(self,e):
+        if self.selected>=0:
+            x,y=self.pos(e); self.points[self.selected]=[min(.99,max(.01,x)),min(1,max(0,y))]; self.points.sort(); self.selected=min(range(len(self.points)),key=lambda i:abs(self.points[i][0]-x)); self.changed.emit(self.points); self.update()
+    def mouseDoubleClickEvent(self,e):
+        if self.points:
+            x,y=self.pos(e); i=min(range(len(self.points)),key=lambda j:(self.points[j][0]-x)**2+(self.points[j][1]-y)**2); self.points.pop(i); self.selected=-1; self.changed.emit(self.points); self.update()
+    def paintEvent(self,e):
+        p=QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing); r=QRectF(8,8,self.width()-16,self.height()-16); p.fillRect(r,QColor('#101923')); p.setPen(QPen(QColor('#425363'),1)); p.drawRect(r); p.setPen(QPen(QColor('#e4ca4a'),2)); pts=[[0,0],*sorted(self.points),[1,1]]; path=QPainterPath(); path.moveTo(r.left(),r.bottom());
+        for x,y in pts[1:]: path.lineTo(r.left()+x*r.width(),r.bottom()-y*r.height())
+        p.drawPath(path); p.setBrush(QColor('#e4ca4a'))
+        for x,y in self.points:p.drawEllipse(QPointF(r.left()+x*r.width(),r.bottom()-y*r.height()),4,4)
+
+
 class Bridge(QObject):
     progress = Signal(int, int, str)
     done = Signal(object)
@@ -77,12 +119,14 @@ class GradingWindow(QDialog):
         first = next((c.get('effects', {}).get('grade') for c in self.targets if grading.active(c.get('effects', {}))), None)
         self.state = dict(look=first.get('look', grading.DEFAULT_LOOK), amount=float(first.get('amount', 1)), correct=bool(first.get('correct', True)),
                           match=bool(first.get('match', True)),
-                          basic=copy.deepcopy(first.get('basic', grading.normalized({})['basic'])), wheels=copy.deepcopy(first.get('wheels', grading.normalized({})['wheels']))) if first else dict(look=grading.DEFAULT_LOOK, amount=1., correct=True, match=True, basic=grading.normalized({})['basic'], wheels=grading.normalized({})['wheels'])
+                          basic=copy.deepcopy(first.get('basic', grading.normalized({})['basic'])), wheels=copy.deepcopy(first.get('wheels', grading.normalized({})['wheels'])), curves=copy.deepcopy(first.get('curves',{})), hue=copy.deepcopy(first.get('hue',{})), inputLut=copy.deepcopy(first.get('inputLut',{})), creativeLut=copy.deepcopy(first.get('creativeLut',{}))) if first else dict(look=grading.DEFAULT_LOOK, amount=1., correct=True, match=True, basic=grading.normalized({})['basic'], wheels=grading.normalized({})['wheels'], curves={}, hue={}, inputLut={}, creativeLut={})
 
         root = QHBoxLayout(self)
         left = QVBoxLayout(); root.addLayout(left, 3)
         self.compare = Compare(); left.addWidget(self.compare, 1)
         self.info = QLabel(); self.info.setWordWrap(True); self.info.setStyleSheet('color:#8796a5'); left.addWidget(self.info)
+        self.scope_kind=QComboBox(); self.scope_kind.addItems(['Waveform','RGB Parade','Vectorscope','Istogramma']); self.scope_kind.currentIndexChanged.connect(lambda _:self.refresh_preview()); left.addWidget(self.scope_kind)
+        self.scope=QLabel(); self.scope.setFixedHeight(115); self.scope.setStyleSheet('background:#050b12'); left.addWidget(self.scope)
         self.looks = QListWidget(); self.looks.setViewMode(QListWidget.ViewMode.IconMode); self.looks.setIconSize(QSize(168, 95))
         self.looks.setFlow(QListWidget.Flow.LeftToRight); self.looks.setWrapping(False); self.looks.setFixedHeight(142)
         self.looks.setMovement(QListWidget.Movement.Static); self.looks.setSpacing(4)
@@ -104,6 +148,11 @@ class GradingWindow(QDialog):
             value=self.state['basic'].get(key,initial/100 if key not in ('contrast','saturation') else initial/100)
             slider.setValue(round(value*100)); slider.sliderReleased.connect(lambda k=key,s=slider:self.edit_basic(k,s.value()/100))
             right.addWidget(slider); self.basic_sliders[key]=slider
+        self.wheel_name=QComboBox(); self.wheel_name.addItems(['lift','gamma','gain','offset']); right.addWidget(self.wheel_name)
+        self.wheel=Wheel(); right.addWidget(self.wheel,0,Qt.AlignmentFlag.AlignHCenter)
+        self.wheel.began.connect(self.e.checkpoint); self.wheel.moved.connect(self.wheel_changed); self.wheel.reset.connect(self.wheel_reset)
+        self.curve_channel=QComboBox(); self.curve_channel.addItems(['master','r','g','b']); right.addWidget(self.curve_channel)
+        self.curve=CurveEditor(); right.addWidget(self.curve); self.curve.changed.connect(self.curve_changed)
         self.amount_label = QLabel(); right.addWidget(self.amount_label)
         self.amount = QSlider(Qt.Orientation.Horizontal); self.amount.setRange(0, 150); self.amount.setValue(round(self.state['amount'] * 100))
         self.amount.valueChanged.connect(self.amount_moving); self.amount.sliderReleased.connect(lambda: self.set_state(amount=self.amount.value() / 100))
@@ -111,6 +160,15 @@ class GradingWindow(QDialog):
         for text, fn in (('Applica di nuovo / rianalizza', self.reanalyse), ('Esporta LUT .cube (DaVinci)…', self.export_cube),
                          ('Rimuovi grading', self.remove), ('Chiudi', self.close)):
             b = QPushButton(text); b.clicked.connect(fn); right.addWidget(b)
+        self.bypass=QCheckBox('Confronto senza grading'); self.bypass.toggled.connect(lambda _:self.refresh_preview()); right.addWidget(self.bypass)
+        self.tabs=QTabWidget();
+        # Keep the complete control column reachable on laptop screens.
+        scroll=QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(panel); self.tabs.addTab(scroll,'Automatico / Primarie / Curve');
+        root.removeWidget(panel); root.addWidget(self.tabs,1)
+        for text,fn in (('Salva preset',self.save_preset),('Carica preset',self.load_preset),('Elimina preset',self.delete_preset),('Applica a tutte le clip',self.apply_all),('Applica alla traccia',self.apply_track)):
+            b=QPushButton(text); right.addWidget(b); b.clicked.connect(fn)
+        self.short_copy=QShortcut(QKeySequence('Ctrl+Shift+C'),self); self.short_copy.activated.connect(self.copy_grade)
+        self.short_paste=QShortcut(QKeySequence('Ctrl+Shift+V'),self); self.short_paste.activated.connect(self.paste_grade)
         self.amount_moving(self.amount.value())
         self.fill_clips(); self.select_look(self.state['look'])
         self.start_analysis(apply_after=True)
@@ -178,20 +236,61 @@ class GradingWindow(QDialog):
     def grade_for(self, c, autos=None, **override):
         s = {**self.state, **override}; autos = autos if autos is not None else self.autos()
         auto = autos.get(self.media(c)['path'], grading.NEUTRAL_AUTO)
-        return dict(look=s['look'], amount=round(s['amount'], 3), correct=s['correct'], match=s['match'], auto=copy.deepcopy(auto), basic=copy.deepcopy(s['basic']), wheels=copy.deepcopy(s['wheels']))
+        return dict(look=s['look'], amount=round(s['amount'], 3), correct=s['correct'], match=s['match'], auto=copy.deepcopy(auto), basic=copy.deepcopy(s['basic']), wheels=copy.deepcopy(s['wheels']), curves=copy.deepcopy(s.get('curves',{})), hue=copy.deepcopy(s.get('hue',{})), inputLut=copy.deepcopy(s.get('inputLut',{})), creativeLut=copy.deepcopy(s.get('creativeLut',{})))
 
     def edit_basic(self, key, value):
         basic=copy.deepcopy(self.state['basic']); basic[key]=value
         self.set_state(basic=basic)
 
-    def apply(self):
+    def wheel_changed(self,x,y):
+        k=self.wheel_name.currentText(); wheels=copy.deepcopy(self.state['wheels']); wheels[k]=[round(.25*x,4),round(.25*y,4),round(-.25*(.2126*x+.7152*y)/.0722,4)]; self.state['wheels']=wheels; self.apply(checkpoint=False)
+    def wheel_reset(self):
+        wheels=copy.deepcopy(self.state['wheels']); wheels[self.wheel_name.currentText()]=[0,0,0]; self.state['wheels']=wheels; self.apply(checkpoint=False)
+    def curve_changed(self,points):
+        curves=copy.deepcopy(self.state.get('curves',{})); curves[self.curve_channel.currentText()]=copy.deepcopy(points); self.state['curves']=curves; self.apply(checkpoint=False)
+
+    def apply(self, checkpoint=True):
         if not self.targets: return
-        autos = self.autos(); self.e.checkpoint()
+        autos = self.autos()
+        if checkpoint:self.e.checkpoint()
         for c in self.targets: c.setdefault('effects', {})['grade'] = self.grade_for(c, autos)
         self.e.changed(); self.refresh_preview(thumbnails=True)
         name = NAMES[self.state['look']]
         self.info.setText(f"Applicato «{name}» al {round(self.state['amount'] * 100)}% su {len(self.targets)} clip. "
                           'Trascina la linea gialla per confrontare. Ctrl+Z annulla. L’export usa la stessa LUT.')
+
+    def copy_grade(self):
+        if not self.focus:return
+        self._grade_clipboard=copy.deepcopy(self.focus.get('effects',{}).get('grade',self.grade_for(self.focus)))
+    def paste_grade(self):
+        grade=getattr(self,'_grade_clipboard',None)
+        if not grade:return
+        self.e.checkpoint()
+        for c in self.targets:
+            g=copy.deepcopy(grade); g['auto']=copy.deepcopy(c.get('effects',{}).get('grade',{}).get('auto',g.get('auto',grading.NEUTRAL_AUTO))); c.setdefault('effects',{})['grade']=g
+        self.e.changed(); self.refresh_preview(thumbnails=True)
+    def apply_all(self):
+        self.targets=[c for c in self.e.project.clips if 'title' not in c and self.e.project.item(c) and self.e.project.item(c).get('hasVideo',True)]; self.apply()
+    def apply_track(self):
+        if not self.focus:return
+        track=self.focus['track']; self.targets=[c for c in self.e.project.clips if c['track']==track and 'title' not in c and self.e.project.item(c) and self.e.project.item(c).get('hasVideo',True)]; self.apply()
+    def preset_dir(self):
+        p=Path(os.environ.get('LOCALAPPDATA',Path.home()))/'EliteStudioWindows'/'grades'; p.mkdir(parents=True,exist_ok=True); return p
+    def save_preset(self):
+        name,ok=QInputDialog.getText(self,'Preset grading','Nome preset:')
+        if ok and name:
+            g=self.grade_for(self.focus or self.targets[0]); g.pop('auto',None); (self.preset_dir()/(name+'.json')).write_text(json.dumps(g,ensure_ascii=False,indent=2),encoding='utf-8')
+    def load_preset(self):
+        files=list(self.preset_dir().glob('*.json'))
+        if not files:return
+        name,ok=QInputDialog.getItem(self,'Carica preset','Preset:',[p.stem for p in files],0,False)
+        if ok:
+            g=json.loads((self.preset_dir()/(name+'.json')).read_text(encoding='utf-8')); g['auto']=copy.deepcopy((self.focus or self.targets[0]).get('effects',{}).get('grade',{}).get('auto',grading.NEUTRAL_AUTO)); self.state.update({k:g[k] for k in ('look','amount','correct','basic','wheels','curves','hue','inputLut','creativeLut') if k in g}); self.apply()
+    def delete_preset(self):
+        files=list(self.preset_dir().glob('*.json'))
+        if files:
+            name,ok=QInputDialog.getItem(self,'Elimina preset','Preset:',[p.stem for p in files],0,False)
+            if ok:(self.preset_dir()/(name+'.json')).unlink(missing_ok=True)
 
     def set_state(self, **kw):
         changed = any(self.state.get(k) != v for k, v in kw.items()); self.state.update(kw)
@@ -236,12 +335,39 @@ class GradingWindow(QDialog):
         if self.focus['media'] and self.media(self.focus)['path'] not in self.analysis and self.busy: return
         grade = self.grade_for(self.focus, **({} if amount is None else dict(amount=amount)))
         removed = not grading.active(self.focus.get('effects', {}))
-        self.compare.set_images(to_pixmap(src), to_pixmap(src if removed else grading.pil(src, grade)))
+        graded=src if removed or self.bypass.isChecked() else grading.pil(src, grade)
+        self.compare.set_images(to_pixmap(src), to_pixmap(graded)); self.update_scope(graded)
         if thumbnails:
             small = src.copy(); small.thumbnail((336, 190), Image.Resampling.BILINEAR)
             for i in range(self.looks.count()):
                 item = self.looks.item(i); k = item.data(Qt.ItemDataRole.UserRole)
                 item.setIcon(QIcon(to_pixmap(grading.pil(small, self.grade_for(self.focus, look=k, amount=1)))))
+
+    def update_scope(self,image):
+        im=image.convert('RGB').resize((256,112)); px=list(im.getdata()); canvas=Image.new('RGB',(256,112),(5,11,18)); d=ImageDraw.Draw(canvas); kind=self.scope_kind.currentText()
+        if kind=='Istogramma':
+            for c,col in enumerate(('#e66','#6d8','#69f')):
+                hist=[0]*256
+                for q in px:hist[q[c]]+=1
+                peak=max(hist) or 1
+                d.line([(x,110-int(hist[x]*100/peak)) for x in range(256)],fill=col)
+        elif kind=='RGB Parade':
+            for c,col in enumerate(('#e66','#6d8','#69f')):
+                x0=c*85
+                for x in range(x0,x0+84):
+                    vals=[q[c] for q in px[(x-x0)::84]]
+                    if vals:
+                        for v in vals[::4]:d.point((x,110-int(v*108/255)),fill=col)
+        elif kind=='Vectorscope':
+            d.ellipse((72,0,184,112),outline='#617080')
+            for r,g,b in px[::12]:
+                yy=.2126*r+.7152*g+.0722*b; xx=(r-b)*.45; y=(g-yy)*.7
+                d.point((128+int(xx*.35),56-int(y*.35)),fill=(r,g,b))
+        else:
+            for x in range(256):
+                vals=[q[0]*.2126+q[1]*.7152+q[2]*.0722 for q in px[x::256]]
+                for v in vals[::2]:d.point((x,110-int(v*108/255)),fill='#d7cf79')
+        self.scope.setPixmap(to_pixmap(canvas))
 
 
 def open_window(editor):

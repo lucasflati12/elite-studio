@@ -15,6 +15,7 @@ import json
 import math
 import os
 import re
+import warnings
 from functools import lru_cache
 from pathlib import Path
 
@@ -70,13 +71,94 @@ def normalized(grade):
     wheels = grade.get('wheels') if isinstance(grade.get('wheels'), dict) else {}
     wheel = lambda k: [num(x, -.25, .25, 0.) for x in wheels.get(k, [0, 0, 0])] if isinstance(wheels.get(k, [0, 0, 0]), list) and len(wheels.get(k, [0, 0, 0])) == 3 else [0., 0., 0.]
     basic = grade.get('basic') if isinstance(grade.get('basic'), dict) else {}
+    curves = grade.get('curves') if isinstance(grade.get('curves'), dict) else {}
+    hue = grade.get('hue') if isinstance(grade.get('hue'), dict) else {}
+    def points(src, periodic=False, shift=False, monotone=False):
+        out=[]
+        if isinstance(src,list):
+            for p in src:
+                if isinstance(p,(list,tuple)) and len(p)==2:
+                    try:
+                        x,y=map(float,p)
+                        if math.isfinite(x) and math.isfinite(y): out.append([x%360 if periodic else min(1,max(0,x)), min(180,max(-180,y)) if shift else min(1,max(0,y)) if monotone else min(2,max(0,y))])
+                    except (TypeError,ValueError): pass
+        out=sorted(out)
+        if monotone:
+            for i in range(1,len(out)):out[i][1]=max(out[i][1],out[i-1][1])
+        return out
+    luts={}
+    for name in ('inputLut','creativeLut'):
+        v=grade.get(name) if isinstance(grade.get(name),dict) else {}
+        luts[name]=dict(path=str(v.get('path','')),amount=num(v.get('amount',0),0,1,0))
     return dict(look=look, amount=num(grade.get('amount', 1), 0, 1.5, 1.), correct=bool(grade.get('correct', True)), auto=auto,
                 wheels={k: wheel(k) for k in ('lift', 'gamma', 'gain', 'offset')},
                 basic={k: num(basic.get(k, d), lo, hi, d) for k, d, lo, hi in (
                     ('temperature', 0., -1., 1.), ('tint', 0., -1., 1.), ('exposure', 0., -5., 5.),
                     ('contrast', 1., 0., 2.), ('pivot', .5, .05, .95), ('highlights', 0., -1., 1.),
                     ('shadows', 0., -1., 1.), ('whites', 0., -1., 1.), ('blacks', 0., -1., 1.),
-                    ('saturation', 1., 0., 2.), ('vibrance', 0., -1., 1.))})
+                    ('saturation', 1., 0., 2.), ('vibrance', 0., -1., 1.))},
+                curves={k: points(curves.get(k, []),monotone=True) for k in ('master','r','g','b')},
+                hue={k: points(hue.get(k, []), k!='lumsat',k=='hue') for k in ('sat','hue','lum','lumsat')}, **luts)
+
+
+def _mono_curve(x, pts):
+    """Fritsch-Carlson monotone cubic, implicit fixed endpoints."""
+    if not pts:return x
+    p=sorted([[0.,0.],*pts,[1.,1.]])
+    clean=[]
+    for a,b in p:
+        if clean and a<=clean[-1][0]+1e-8: continue
+        clean.append([a,min(1,max(0,b))])
+    if len(clean)<2:return x
+    xx=np.array([p[0] for p in clean]); yy=np.array([p[1] for p in clean]); d=np.diff(yy)/np.maximum(1e-9,np.diff(xx))
+    m=np.zeros_like(yy); m[0]=d[0]; m[-1]=d[-1]
+    for i in range(1,len(yy)-1): m[i]=0 if d[i-1]*d[i]<=0 else 2*d[i-1]*d[i]/(d[i-1]+d[i])
+    for i,di in enumerate(d):
+        if di==0:m[i]=m[i+1]=0
+        else:
+            a=m[i]/di;b=m[i+1]/di;s=a*a+b*b
+            if s>9:t=3/math.sqrt(s);m[i]=t*a*di;m[i+1]=t*b*di
+    z=np.clip(x,xx[0],xx[-1]); j=np.clip(np.searchsorted(xx,z,side='right')-1,0,len(xx)-2); h=xx[j+1]-xx[j]; t=(z-xx[j])/h
+    return (2*t**3-3*t**2+1)*yy[j]+(t**3-2*t**2+t)*h*m[j]+(-2*t**3+3*t**2)*yy[j+1]+(t**3-t**2)*h*m[j+1]
+
+def _periodic(x, pts, neutral):
+    if not pts:return np.full_like(x,neutral,dtype=float)
+    pp=sorted(pts); xx=np.array([p[0] for p in pp]); yy=np.array([p[1] for p in pp]); xp=np.concatenate((xx[-1:]-360,xx,xx[:1]+360)); yp=np.concatenate((yy[-1:],yy,yy[:1])); return np.interp(x%360,xp,yp)
+
+@lru_cache(maxsize=64)
+def load_cube(path, mtime):
+    size1=size3=None; lo=np.zeros(3); hi=np.ones(3); rows=[]
+    for line in Path(path).read_text(encoding='utf-8-sig').splitlines():
+        line=line.split('#',1)[0].strip()
+        if not line or line.startswith('TITLE'):continue
+        a=line.split()
+        if a[0]=='LUT_1D_SIZE':size1=int(a[1])
+        elif a[0]=='LUT_3D_SIZE':size3=int(a[1])
+        elif a[0]=='DOMAIN_MIN':lo=np.array(list(map(float,a[1:4])))
+        elif a[0]=='DOMAIN_MAX':hi=np.array(list(map(float,a[1:4])))
+        elif len(a)>=3:
+            try: rows.append(list(map(float,a[:3])))
+            except ValueError: pass
+    if size3 and len(rows)>=size3**3: return (size3,np.asarray(rows[-size3**3:],dtype=np.float32),lo,hi,3)
+    if size1 and len(rows)>=size1: return (size1,np.asarray(rows[-size1:],dtype=np.float32),lo,hi,1)
+    raise ValueError(f'LUT .cube non valido: {path}')
+
+def user_lut(rgb, spec):
+    path=spec.get('path',''); amount=spec.get('amount',0)
+    if not path or amount<=0:return rgb
+    try: st=os.stat(path); n,data,lo,hi,dim=load_cube(path,st.st_mtime_ns)
+    except OSError as e: warnings.warn(f'LUT mancante: {path} ({e})'); return rgb
+    except Exception as e: warnings.warn(f'LUT non valida: {path} ({e})'); return rgb
+    q=np.clip((rgb-lo)/np.maximum(1e-9,hi-lo),0,1)
+    if dim==1:
+        ix=q*(n-1); j=np.minimum(ix.astype(int),n-2); f=ix-j; out=np.stack([np.interp(ix[...,c],np.arange(n),data[:,c]) for c in range(3)],-1)
+    else:
+        ix=q*(n-1); j=np.minimum(ix.astype(int),n-2); f=ix-j; out=np.zeros_like(rgb)
+        for a in (0,1):
+          for b in (0,1):
+           for c in (0,1):
+            w=(f[...,0] if a else 1-f[...,0])*(f[...,1] if b else 1-f[...,1])*(f[...,2] if c else 1-f[...,2]); idx=(j[...,2]+c)*n*n+(j[...,1]+b)*n+j[...,0]+a; out+=data[idx]*w[...,None]
+    return np.clip(rgb+(out-rgb)*amount,0,1)
 
 
 def _rgb_to_hsv(rgb):
@@ -152,6 +234,7 @@ def apply(rgb, grade):
     g = normalized(grade)
     if g is None: return rgb
     base = correct(rgb, g['auto']) if g['correct'] else np.clip(rgb, 0, 1)
+    base=user_lut(base,g['inputLut'])
     b = g['basic']
     if b != dict(temperature=0., tint=0., exposure=0., contrast=1., pivot=.5, highlights=0., shadows=0., whites=0., blacks=0., saturation=1., vibrance=0.) or any(any(v) for v in g['wheels'].values()):
         base = base * (2 ** b['exposure'])
@@ -167,9 +250,18 @@ def apply(rgb, grade):
             base += np.asarray(g['wheels'][k]) * scale[..., None]
         base += np.asarray(g['wheels']['offset'])
         base = np.clip(base, 0, 1)
-    if g['look'] == 'none' or g['amount'] <= 0: return base
-    out = look(base, LOOKS[g['look']])
-    return np.clip(base + (out - base) * g['amount'], 0, 1)
+    if any(g['curves'].values()):
+        base=_mono_curve(base,g['curves']['master'])
+        for c,k in enumerate(('r','g','b')): base[...,c]=_mono_curve(base[...,c],g['curves'][k])
+    if any(g['hue'].values()):
+        h,s,v=_rgb_to_hsv(np.clip(base,0,1)); chroma=_smooth(.04,.22,s)
+        sat=_periodic(h,g['hue']['sat'],1); shift=_periodic(h,g['hue']['hue'],0); lum=_periodic(h,g['hue']['lum'],1)
+        ls=_periodic((base@LUMA),g['hue']['lumsat'],1)
+        h=h+shift*chroma; s=np.clip(s*(1+(sat-1)*chroma)*(1+(ls-1)*chroma),0,1); v=np.clip(v*(1+(lum-1)*chroma),0,1)
+        base=_hsv_to_rgb(h,s,v)
+    if g['look'] != 'none' and g['amount'] > 0:
+        out = look(base, LOOKS[g['look']]); base=np.clip(base + (out - base) * g['amount'], 0, 1)
+    return user_lut(base,g['creativeLut'])
 
 
 def key(grade):

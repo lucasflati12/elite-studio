@@ -33,6 +33,25 @@ class GradingTests(unittest.TestCase):
         grade = dict(look='none', correct=False, wheels=dict(lift=[.1, 0, 0]), basic=dict(exposure=.5))
         self.assertFalse(np.allclose(base, grading.apply(rgb, grade)))
 
+    def test_curves_identity_monotone_and_hue_wrap(self):
+        x=np.linspace(0,1,1001)
+        self.assertTrue(np.array_equal(grading._mono_curve(x,[]),x))
+        y=grading._mono_curve(x,[[.2,.1],[.55,.7],[.8,.75]])
+        self.assertTrue(np.all(np.diff(y)>=-1e-10))
+        p=[[10,1.2],[180,.8]]
+        a=grading._periodic(np.array([359.,1.]),p,1)
+        self.assertLess(abs(a[0]-a[1]),.1)
+
+    def test_cube_import_export_roundtrip_and_zero_amount(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            grade=dict(look='none',correct=False,basic=dict(exposure=.1))
+            path=grading.cube(grade,tmp)
+            imported=dict(look='none',correct=False,inputLut=dict(path=str(path),amount=1))
+            self.assertLess(float(abs(grading.table(imported)-grading.table(dict(look='none',correct=False,basic=dict(exposure=.1)))).max()),1e-4)
+            rgb=np.array([[.2,.4,.8]])
+            self.assertTrue(np.array_equal(grading.apply(rgb,dict(look='none',correct=False,inputLut=dict(path=str(path),amount=0))),rgb))
+            self.assertTrue(np.array_equal(grading.apply(rgb,dict(look='none',correct=False,creativeLut=dict(path=str(path),amount=0))),rgb))
+
     def test_normalized_clamps_and_defaults(self):
         g = grading.normalized(dict(look='nope', amount=9, auto=dict(black=-1, white='x', wb=[5, 0, 1])))
         self.assertEqual(g['look'], grading.DEFAULT_LOOK); self.assertEqual(g['amount'], 1.5)
@@ -63,7 +82,11 @@ class GradingTests(unittest.TestCase):
             Image.fromarray(np.dstack([img, x[None, :].repeat(256, 0) // 2]).astype(np.uint8)).save(src)
             grade = dict(look='alpine', auto=dict(black=.08, white=.9, gamma=.9, wb=[1.01, 1, .98], flat=True),
                          basic=dict(exposure=.25, contrast=1.15, pivot=.48, saturation=1.1, vibrance=.2),
-                         wheels=dict(lift=[.01, 0, -.01], gamma=[0, .01, 0], gain=[.01, 0, 0]))
+                         wheels=dict(lift=[.01, 0, -.01], gamma=[0, .01, 0], gain=[.01, 0, 0]),
+                         curves=dict(master=[[.25,.20],[.7,.78]],r=[[.4,.45]]),
+                         hue=dict(sat=[[10,1.15],[170,.9]],hue=[[20,4],[220,-5]],lum=[[40,1.1],[210,.95]],lumsat=[[.3,.85],[.7,1.1]]))
+            user=grading.cube(dict(look='none',correct=False,basic=dict(exposure=.08)),tmp)
+            grade['inputLut']=dict(path=str(user),amount=.45); grade['creativeLut']=dict(path=str(user),amount=.2)
             subprocess.run([tool('ffmpeg'), '-v', 'error', '-y', '-i', str(src), '-vf', 'format=rgba,' + grading.ffmpeg_filter(grade, tmp), str(out)],
                            check=True, creationflags=CREATE_FLAGS)
             a = np.asarray(Image.open(out).convert('RGB'), dtype=float)
