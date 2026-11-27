@@ -335,7 +335,10 @@ struct TimelineBar: View {
             Text(editor.status).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
             Spacer()
             Image(systemName: "minus.magnifyingglass").foregroundStyle(.secondary)
-            Slider(value: Binding(get: { log(editor.pixelsPerSecond) }, set: { editor.pixelsPerSecond = exp($0) }), in: log(1)...log(800))
+            // through zoomTimeline so the slider zooms on the playhead like pinch / ⌘-scroll / +−
+            Slider(value: Binding(get: { log(editor.pixelsPerSecond) }, set: { v in
+                if let zoom = editor.zoomTimeline { zoom(exp(v) / editor.pixelsPerSecond) } else { editor.pixelsPerSecond = exp(v) }
+            }), in: log(1)...log(800))
                 .frame(width: 110)
             Button { editor.fitTimeline?() } label: { Image(systemName: "arrow.left.and.right") }.help("Adatta la timeline (\\)")
         }
