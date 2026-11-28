@@ -64,6 +64,13 @@ class WindowsTests(unittest.TestCase):
         sound=np.frombuffer(pcm,dtype='<f4')
         self.assertGreater(np.std(sound[6000:18000]),.02)
         self.assertLess(np.std(sound[56000:64000]),.003)
+    def test_late_clip_keeps_its_audio(self):
+        # FFmpeg 8+: atempo + adelay + apad + atrim dropped the delayed audio unless timestamps are rebuilt
+        p=self.basic(); later=p.add_clip(p.media[0]['id'],0,1.5); later.update(duration=.5,speed=2)
+        out=self.folder/'late-audio.mp4'; export(p,out)
+        pcm=subprocess.run([tool('ffmpeg'),'-v','error','-i',str(out),'-vn','-ac','1','-ar','48000','-f','f32le','pipe:1'],capture_output=True,check=True,creationflags=CREATE_FLAGS).stdout
+        sound=np.frombuffer(pcm,dtype='<f4'); early=np.std(sound[6000:18000]); late=np.std(sound[76800:91200])
+        self.assertGreater(late,.02); self.assertAlmostEqual(late/early,1,delta=.1)
     def test_title_only_ignores_legacy_logo_setting(self):
         p=Project(); p.settings.update(width=320,height=180,fps=12,showLogo=True,logoY=10)
         p.clips.append(dict(id='title',track=2,start=0,duration=.5,**{'in':0},title=dict(names=['Andrea','Test'],fade=0)))

@@ -32,6 +32,27 @@ def tool(name):
     return path
 
 
+_FFMPEG_MAJOR = {}
+
+
+def ffmpeg_major():
+    exe = tool('ffmpeg')
+    if exe not in _FFMPEG_MAJOR:
+        import re
+        try:
+            out = subprocess.run([exe, '-hide_banner', '-version'], capture_output=True, text=True, timeout=20, creationflags=CREATE_FLAGS).stdout
+            match = re.search(r'version n?(\d+)\.', out)
+            _FFMPEG_MAJOR[exe] = int(match.group(1)) if match else 99   # git builds ("N-1234-g...") are recent
+        except Exception:
+            _FFMPEG_MAJOR[exe] = 99
+    return _FFMPEG_MAJOR[exe]
+
+
+def filter_script_args(path):
+    """FFmpeg 7 replaced -filter_complex_script with -/filter_complex (the old option is gone in 8+)."""
+    return ['-/filter_complex', str(path)] if ffmpeg_major() >= 7 else ['-filter_complex_script', str(path)]
+
+
 def probe(path):
     from pano import primary
     path = primary(path)
@@ -494,13 +515,13 @@ def _export(project, output, progress=lambda value: None, cancel=None, hevc=Fals
                     delay=round(c['start']*1000)
                     from effects import audio_filters
                     time_filter=atempo(speed) if c.get('pitch',True) else f'aresample=48000,asetrate=48000*{speed},aresample=48000'
-                    graph.append(f'[{index}:a]asetpts=PTS-STARTPTS,{time_filter},atrim=duration={c["duration"]},{audio_filters(c)},aresample=48000,aformat=channel_layouts=stereo,adelay={delay}|{delay},apad,atrim=duration={duration}[a{index}]')
+                    graph.append(f'[{index}:a]asetpts=PTS-STARTPTS,{time_filter},atrim=duration={c["duration"]},{audio_filters(c)},aresample=48000,aformat=channel_layouts=stereo,adelay={delay}|{delay},asetpts=N/SR/TB,apad,atrim=duration={duration}[a{index}]')
                     audio.append(f'[a{index}]')
             index+=1
         graph.append(''.join(audio)+f'amix=inputs={len(audio)}:duration=first:dropout_transition=0,volume={len(audio)},alimiter=limit=0.95[audio]')
         partial=Path(tmp)/'render.mp4'
         filter_file=Path(tmp)/'filters.txt'; filter_file.write_text(';'.join(graph),encoding='utf-8')
-        args+=['-filter_complex_script',str(filter_file),'-map',f'[{previous}]','-map','[audio]','-t',str(duration),
+        args+=[*filter_script_args(filter_file),'-map',f'[{previous}]','-map','[audio]','-t',str(duration),
                *encode_args,
                '-c:a','aac','-b:a','192k','-movflags','+faststart','-progress','pipe:1','-nostats',str(partial)]
         log=Path(tmp)/'ffmpeg.log'

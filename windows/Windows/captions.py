@@ -194,7 +194,7 @@ def transcribe(project,status=lambda text:None):
             from effects import audio_filters
             # Keep every mix input alive: otherwise amix raises the gain as short
             # clips end, and the fixed compensation clips later speech badly.
-            graph.append(f'[{i}:a]asetpts=PTS-STARTPTS,{atempo(c.get("speed",1))},atrim=duration={c["duration"]},{audio_filters(c)},aresample=16000,aformat=channel_layouts=mono,adelay={round(c["start"]*1000)},apad,atrim=duration={project.duration}[a{i}]'); labels.append(f'[a{i}]')
+            graph.append(f'[{i}:a]asetpts=PTS-STARTPTS,{atempo(c.get("speed",1))},atrim=duration={c["duration"]},{audio_filters(c)},aresample=16000,aformat=channel_layouts=mono,adelay={round(c["start"]*1000)},asetpts=N/SR/TB,apad,atrim=duration={project.duration}[a{i}]'); labels.append(f'[a{i}]')
         graph.append(''.join(labels)+f'amix=inputs={len(labels)}:duration=first:dropout_transition=0,volume={len(labels)},highpass=f=100,lowpass=f=6500,alimiter=limit=0.95[mix]')
         args+=['-filter_complex',';'.join(graph),'-map','[mix]','-ac','1','-ar','16000',str(wav)]
         status('Preparo l’audio della timeline…'); result=subprocess.run(args,capture_output=True,creationflags=CREATE_FLAGS)
